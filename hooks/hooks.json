@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "prompt",
-            "prompt": "You are the Compound Orchestrator stop hook. Decide whether this session learned a durable project convention, gotcha, test command, scoped lint command, path-specific workflow, or repeated failure that should be captured before stopping. If no durable update is needed, return {\"ok\": true}. If one is needed and was not already recorded in CLAUDE.md, a subdirectory CLAUDE.md, docs/patterns, docs/decisions, docs/failures, or docs/compound, return {\"ok\": false, \"reason\": \"Before stopping, record the durable learning or propose the exact CLAUDE.md/subdirectory update to make future sessions better.\"}."
+            "prompt": "You are the Compound Orchestrator stop hook. Decide whether this session learned a durable project convention, gotcha, test command, scoped lint command, path-specific workflow, writing/review rule, README change, or repeated failure that should be captured before stopping. If no durable update is needed, return {\"ok\": true}. If one is needed and was not already recorded in README.md, CLAUDE.md, a subdirectory CLAUDE.md, docs/patterns, docs/decisions, docs/failures, docs/compound, or .agent-loop/readme-maintenance.md, return {\"ok\": false, \"reason\": \"Before stopping, record the durable learning or propose the exact README.md, CLAUDE.md, subdirectory, or durable-doc update to make future sessions better.\"}."
           }
         ]
       }

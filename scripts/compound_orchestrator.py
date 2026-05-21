@@ -7,6 +7,7 @@ import argparse
 import datetime as _dt
 import json
 import re
+import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass, field
@@ -64,7 +65,8 @@ KIND_TO_DIR = {
 }
 
 OWNERSHIP_FILE = ".agent-loop/coordination/ownership.json"
-TOOL_CHOICES = ["claude", "codex"]
+SUGGESTED_TOOL_NAMES = ["claude", "codex", "cursor", "aider", "other"]
+TOOL_NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{1,39}$")
 
 
 @dataclass
@@ -133,6 +135,13 @@ def paths_overlap(left: str, right: str) -> bool:
     if "*" in right or "?" in right or "[" in right:
         return left == right or left.startswith(right.split("*", 1)[0].rstrip("/") + "/")
     return left == right or left.startswith(right + "/") or right.startswith(left + "/")
+
+
+def validate_tool_name(tool: str, *, field: str = "tool") -> str:
+    normalized = tool.strip().lower()
+    if not TOOL_NAME_RE.match(normalized):
+        raise ValueError(f"{field} must be 2-40 lowercase letters, numbers, underscores, or hyphens")
+    return normalized
 
 
 def ensure_dirs(root: Path) -> WriteReport:
@@ -219,8 +228,7 @@ def claim_scope(
     intent: str = "",
     force: bool = False,
 ) -> WriteReport:
-    if tool not in TOOL_CHOICES:
-        raise ValueError(f"tool must be one of: {', '.join(TOOL_CHOICES)}")
+    tool = validate_tool_name(tool)
     if not paths:
         raise ValueError("at least one path must be claimed")
     root = root.resolve()
@@ -290,6 +298,8 @@ def release_scope(
     paths: Optional[List[str]] = None,
 ) -> Tuple[int, WriteReport]:
     root = root.resolve()
+    if tool:
+        tool = validate_tool_name(tool)
     data = load_ownership(root)
     normalized_paths = [normalize_scope_path(item) for item in (paths or [])]
     released = 0
@@ -413,17 +423,34 @@ def upsert_managed_block(root: Path, relative: str, title: str, body: str) -> Wr
     return report
 
 
+def upsert_readme(root: Path) -> WriteReport:
+    relative = "README.md"
+    path = root / relative
+    if path.exists():
+        return upsert_managed_block(root, relative, "Project", readme_maintenance_block())
+
+    block = f"{MANAGED_START}\n{readme_maintenance_block().strip()}\n{MANAGED_END}\n"
+    content = project_readme_starter().strip() + "\n\n" + block
+    return write_file(root, relative, content, force=False)
+
+
+def copy_orchestrator_script(root: Path, *, force: bool = False) -> WriteReport:
+    source = Path(__file__).resolve()
+    return write_file(root, "scripts/compound_orchestrator.py", source.read_text(encoding="utf-8"), force=force)
+
+
 def common_protocol_block(tool_name: str) -> str:
     return f"""
 ## Compound Engineering Protocol For {tool_name}
 
-Use this repository as a compound engineering system:
+Use this repository as a compound engineering system for coding, writing, research, documentation, or mixed project work:
 
 1. Start meaningful work with a task brief or plan in `docs/plans/`.
 2. Keep implementation scoped to the plan unless new evidence changes it.
-3. Run `scripts/verify.ps1` or the closest project-specific verification before completion.
-4. Review changes for bugs, missing tests, security risks, and product regressions.
+3. Run `scripts/verify.py`, `scripts/verify.ps1`, `scripts/verify.sh`, or the closest project-specific verification before completion.
+4. Review changes for bugs, missing tests, security risks, product regressions, factual drift, stale documentation, and unclear writing.
 5. Record durable learning in `docs/patterns/`, `docs/decisions/`, `docs/failures/`, or `docs/compound/`.
+6. Keep `README.md` current by removing stale information, preserving still-true information, adding new content, and reorganizing it into an easy-to-follow narrative.
 
 Completion gate:
 
@@ -433,6 +460,7 @@ Completion gate:
 - A cross-tool review exists when Claude Code reviews Codex-authored changes or Codex reviews Claude-authored changes.
 - Verification was run or the blocker is documented.
 - Review findings are resolved or explicitly accepted.
+- `README.md` reflects the latest project state when the task changes setup, usage, architecture, workflow, output, or audience-facing behavior.
 - A compound note records what future work should reuse or avoid.
 
 Parallel agent policy:
@@ -445,9 +473,9 @@ Parallel agent policy:
 - Codex should mirror the same team shape with a lead-integrator hub plus explorer/worker/reviewer agents; workers must have disjoint write scopes.
 - Before editing, claim intended files with `compound_orchestrator.py claim`.
 - Before handing off, release claims with `compound_orchestrator.py release` or document why they remain active.
-- Use the opposite tool's reviewer for cross-tool review: Claude reviews Codex-authored changes, and Codex reviews Claude-authored changes.
+- Use the opposite tool's reviewer for cross-tool review: Claude reviews Codex-authored changes, Codex reviews Claude-authored changes, and other agents use the same author/reviewer split.
 
-Large-codebase harness rules:
+Project harness rules:
 
 - Keep root `CLAUDE.md` short: big picture, navigation pointers, and critical gotchas only.
 - Put local build/test/lint commands in subdirectory `CLAUDE.md` files.
@@ -457,15 +485,116 @@ Large-codebase harness rules:
 """
 
 
+def readme_maintenance_block() -> str:
+    return """
+## README Maintenance
+
+Treat `README.md` as part of the product, not as a stale landing page.
+
+When a task changes setup, usage, architecture, workflow, commands, generated outputs, public behavior, or the intended audience:
+
+1. Remove outdated information.
+2. Keep information that is still true, reorganizing it when needed.
+3. Add the new information readers need.
+4. Do a final pass so the README is easy to follow and reflects the latest project state.
+
+For writing projects, keep the README aligned with the current manuscript, outline, sources, export process, and review workflow.
+
+For coding projects, keep the README aligned with install, run, test, architecture, deployment, and troubleshooting reality.
+"""
+
+
+def readme_maintenance_template() -> str:
+    return """
+# README Maintenance Guide
+
+Use this guide for every coding, writing, research, or mixed project created by Compound Orchestrator.
+
+## Update Rule
+
+Update `README.md` whenever work changes:
+
+- setup or installation
+- commands or verification
+- architecture or project layout
+- user-facing behavior
+- writing scope, manuscript structure, export process, or review workflow
+- agent workflow, ownership, or project conventions
+
+## Edit Process
+
+1. Remove old information that is no longer true.
+2. Keep unchanged information that is still useful.
+3. Add new content required by the latest work.
+4. Reorganize the README into a coherent narrative.
+5. Verify examples, commands, and paths.
+
+## Suggested Shape
+
+- What this project is
+- Who it is for
+- Current status
+- Quick start
+- Project layout
+- Daily workflow
+- Verification
+- Agent workflow
+- Maintenance notes
+"""
+
+
+def project_readme_starter() -> str:
+    return """
+# Project
+
+This project is managed with Compound Orchestrator.
+
+## Current Status
+
+Describe the current project state, audience, and primary outcome.
+
+## Quick Start
+
+Add the commands or steps needed to work with this project.
+
+## Project Layout
+
+See `CODEBASE_MAP.md` for the lightweight map of important directories.
+
+## Agent Workflow
+
+Use the compound loop:
+
+```text
+brainstorm -> plan -> work -> review -> compound
+```
+
+Before multi-agent edits, claim files with:
+
+```bash
+python scripts/compound_orchestrator.py claim --target . --tool codex --agent AGENT --task-id TASK --paths path/to/file
+```
+
+## Verification
+
+Use the cross-platform verifier:
+
+```bash
+python scripts/verify.py
+```
+"""
+
+
 def strategy_template() -> str:
     return """
 # Strategy
 
-## Product Direction
+## Project Direction
 
-- Target user:
-- Primary job to be done:
-- Current outcome metric:
+- Audience or user:
+- Primary outcome:
+- Current artifact:
+- Success signal:
 - Constraints:
 
 ## Active Tracks
@@ -489,7 +618,7 @@ def task_brief_template() -> str:
 
 ## Goal
 
-Describe the user-visible outcome.
+Describe the user-visible or reader-visible outcome.
 
 ## Context
 
@@ -499,9 +628,10 @@ Start Claude Code from the most specific subdirectory for this task when using C
 
 ## Definition Of Done
 
-- [ ] Implementation complete
+- [ ] Work product complete
 - [ ] Tests or verification complete
 - [ ] Review complete
+- [ ] `README.md` updated if setup, usage, architecture, workflow, outputs, or audience-facing behavior changed
 - [ ] Compound note written
 
 ## Risks
@@ -541,7 +671,7 @@ def review_rubric_template() -> str:
     return """
 # Review Rubric
 
-Lead with findings. Prioritize correctness, security, user-visible regressions, missing tests, and maintainability risks.
+Lead with findings. Prioritize correctness, security, user-visible or reader-visible regressions, missing tests, factual drift, stale documentation, and maintainability risks.
 
 ## Required Checks
 
@@ -550,8 +680,10 @@ Lead with findings. Prioritize correctness, security, user-visible regressions, 
 - Are tests meaningful and close to the risk?
 - Did the implementation follow existing project patterns?
 - Did it introduce same-file ownership conflicts from parallel work?
-- Did Claude Code and Codex claims overlap in `.agent-loop/coordination/ownership.json`?
+- Did active agent claims overlap in `.agent-loop/coordination/ownership.json`?
 - Did the opposite tool review the change when both tools participated?
+- Is `README.md` current and easy to follow after the change?
+- For writing work, are claims, sources, outline, terminology, and export instructions still accurate?
 - Should any lesson become a pattern, decision, or failure note?
 
 ## Severity
@@ -586,7 +718,7 @@ Use this after each meaningful task.
 
 def codebase_map_template() -> str:
     return """
-# Codebase Map
+# Project Map
 
 Keep this file lightweight. One line per top-level area is enough. For large areas, create another `CODEBASE_MAP.md` or `CLAUDE.md` deeper in the tree.
 
@@ -595,15 +727,17 @@ Keep this file lightweight. One line per top-level area is enough. For large are
 | `.agent-loop/` | Compound engineering templates and gates | `.agent-loop/harness-checklist.md` |
 | `.claude/` | Claude Code project commands, agents, settings, and optional skills | `.claude/settings.json` |
 | `docs/` | Durable decisions, patterns, failures, plans, reviews, and compound notes | `docs/compound/` |
-| `scripts/` | Project verification and automation entrypoints | `scripts/verify.ps1` |
+| `scripts/` | Project verification and automation entrypoints | `scripts/verify.py` |
+| `src/` or app folders | Product code, services, packages, or app surfaces | Add local `CLAUDE.md` when commands differ |
+| `drafts/`, `manuscript/`, or writing folders | Writing project source material, chapters, essays, reports, or exports | Add local context for outline, sources, and review rules |
 """
 
 
 def harness_checklist_template() -> str:
     return """
-# Large-Codebase Harness Checklist
+# Project Harness Checklist
 
-Use this checklist when setting up or reviewing the Claude/Codex harness.
+Use this checklist when setting up or reviewing the Claude/Codex/agent harness for coding, writing, research, documentation, or mixed projects.
 
 ## Foundation
 
@@ -612,6 +746,7 @@ Use this checklist when setting up or reviewing the Claude/Codex harness.
 - [ ] Subdirectory `CLAUDE.md` files capture local build, test, lint, and naming conventions.
 - [ ] Developers start Claude Code in the subdirectory they are changing.
 - [ ] `CODEBASE_MAP.md` points to top-level areas and deeper local context.
+- [ ] `README.md` is current, reader-friendly, and includes the managed README maintenance policy.
 
 ## Automation
 
@@ -619,6 +754,7 @@ Use this checklist when setting up or reviewing the Claude/Codex harness.
 - [ ] Hooks handle automatic checks or improvement prompts instead of relying on memory.
 - [ ] Stop hook proposes `CLAUDE.md` or durable-memory updates when a session learns something reusable.
 - [ ] Verification entrypoint exists and is scoped enough to avoid full-suite overuse.
+- [ ] `scripts/verify.py`, `scripts/verify.ps1`, and `scripts/verify.sh` work on the platforms the team uses.
 
 ## Skills And Plugins
 
@@ -636,6 +772,7 @@ Use this checklist when setting up or reviewing the Claude/Codex harness.
 
 - [ ] Harness review happens every 3-6 months and after major model releases.
 - [ ] Dead instructions and obsolete hooks are removed.
+- [ ] README updates remove obsolete information, keep still-true information, add new content, and reorganize the narrative.
 - [ ] Repeated failures become docs, tests, hooks, or skills.
 """
 
@@ -644,11 +781,11 @@ def module_claude_template() -> str:
     return """
 # Subdirectory CLAUDE.md Template
 
-Copy this into a service, package, or module as `CLAUDE.md`. Keep it local and specific.
+Copy this into a service, package, chapter, manuscript section, research area, or module as `CLAUDE.md`. Keep it local and specific.
 
 ## Purpose
 
-What this module owns in one or two sentences.
+What this area owns in one or two sentences.
 
 ## Local Commands
 
@@ -657,6 +794,7 @@ What this module owns in one or two sentences.
 - Focused test:
 - Lint:
 - Typecheck:
+- Draft/export/check:
 
 ## Local Conventions
 
@@ -664,6 +802,7 @@ What this module owns in one or two sentences.
 - Error handling:
 - Data/model boundaries:
 - Generated files:
+- Source/citation rules:
 
 ## Gotchas
 
@@ -741,10 +880,11 @@ Add these after the context layer, hooks, and skills are healthy.
 | Internal docs | Avoid stale local knowledge | TBD | TBD | Backlog |
 | Ticketing system | Link work to source of truth | TBD | TBD | Backlog |
 | Analytics/logs | Debug with live operational context | TBD | TBD | Backlog |
+| Source library or reference manager | Keep writing projects grounded in current source material | TBD | TBD | Backlog |
 
 ## Rule
 
-Do not add MCP servers just because they are available. Add them when repeated work is blocked by information Claude cannot reach through the repo, docs, or normal tools.
+Do not add MCP servers just because they are available. Add them when repeated work is blocked by information an agent cannot reach through the repo, docs, or normal tools.
 """
 
 
@@ -793,7 +933,7 @@ Use this file as the shared operating contract for Claude Code agent teams and C
 | --- | --- | --- | --- | --- |
 | Lead Integrator | lead session | local lead | Plan, assign, synthesize, integrate | Final diff and summary |
 | Architect | `compound-architect` | explorer | Existing patterns, design, risks | Architecture notes |
-| Implementer | task-specific teammate | worker | Bounded code change with owned files | Patch or handoff |
+| Implementer | task-specific teammate | worker | Bounded work product with owned files | Patch, draft, or handoff |
 | Test Runner | `compound-test-runner` | worker/explorer | Verification strategy and execution | Test results |
 | Reviewer | `compound-reviewer` | explorer/reviewer | Correctness, security, tests, product risk | Findings |
 | Claude Cross-Tool Reviewer | `compound-cross-tool-reviewer` | n/a | Review Codex-authored changes | Cross-tool findings |
@@ -807,6 +947,7 @@ Use a team for:
 - research and review
 - competing debugging hypotheses
 - new modules with separable ownership
+- writing or research sections with separable claims, sources, or review lanes
 - cross-layer work where frontend, backend, and tests can be owned separately
 
 Do not use a team for:
@@ -822,7 +963,7 @@ Do not use a team for:
 - Ask Claude to create an agent team in natural language; Claude creates the runtime team config itself.
 - Reuse plugin or project agent definitions as teammate types.
 - Start with 3-5 teammates and give each teammate a scoped task.
-- Use `compound-cross-tool-reviewer` when reviewing code authored by Codex.
+- Use `compound-cross-tool-reviewer` when reviewing work authored by Codex or another agent runtime.
 - Keep runtime team files under `~/.claude/teams/` untouched; they are managed by Claude Code.
 
 ## Codex Parallel-Agent Rules
@@ -833,11 +974,11 @@ Do not use a team for:
 - Workers that edit files must have disjoint ownership.
 - Explorer/reviewer agents should be read-only unless explicitly assigned a patch.
 - The lead should not redo delegated work; integrate results and fill gaps.
-- Use the `codex-cross-tool-reviewer` skill when reviewing code authored by Claude Code.
+- Use the `codex-cross-tool-reviewer` skill when reviewing work authored by Claude Code or another agent runtime.
 
 ## Ownership Claims
 
-Before edits, claim files or directories:
+Before edits, claim files, directories, drafts, or artifacts:
 
 ```bash
 python scripts/compound_orchestrator.py claim --tool codex --agent codex-worker --task-id TASK --paths src/payments.py tests/test_payments.py --intent "Implement retry handling"
@@ -877,7 +1018,7 @@ Codex does not use Claude Code's runtime team config. It should mirror the same 
 - Delegate bounded sidecar tasks with clear scopes.
 - Prevent overlapping write ownership.
 - Claim intended write paths in `.agent-loop/coordination/ownership.json` before edits.
-- Refuse to edit files actively claimed by Claude Code unless the lead releases or explicitly resolves the claim.
+- Refuse to edit files actively claimed by another agent runtime unless the lead releases or explicitly resolves the claim.
 - Integrate returned work and run verification.
 - Request Claude `compound-cross-tool-reviewer` review for Codex-authored changes when Claude Code is part of the workflow.
 - Run Codex `codex-cross-tool-reviewer` review for Claude-authored changes before integration.
@@ -886,11 +1027,12 @@ Codex does not use Claude Code's runtime team config. It should mirror the same 
 ## Delegation Prompt Template
 
 ```text
-You are not alone in this codebase. Other agents may be working in parallel.
+You are not alone in this project. Other agents may be working in parallel.
 
+Runtime or tool label:
 Role:
 Goal:
-Owned files or modules:
+Owned files, modules, drafts, or artifacts:
 Read-only context:
 Output artifact:
 Verification responsibility:
@@ -903,9 +1045,9 @@ List changed files and remaining risks in your final answer.
 
 ## Recommended Parallel Lanes
 
-- Explorer: read-only codebase pattern research.
+- Explorer: read-only project pattern research.
 - Architect: plan decomposition and risks.
-- Worker: bounded implementation in owned files.
+- Worker: bounded implementation, writing, or documentation in owned files.
 - Test Runner: test design, execution, failure diagnosis.
 - Reviewer: diff review against `.agent-loop/review-rubric.md`.
 
@@ -915,7 +1057,7 @@ A Codex team run is complete only when the lead has:
 
 - synthesized agent outputs
 - confirmed no active cross-tool ownership conflict remains
-- completed the opposite-tool review when both Claude Code and Codex participated
+- completed the opposite-tool review when more than one agent runtime participated
 - resolved or accepted review findings
 - run verification or documented the blocker
 - written a compound note under `docs/compound/`
@@ -926,7 +1068,7 @@ def cross_tool_protocol_template() -> str:
     return """
 # Cross-Tool Conflict And Review Protocol
 
-Use this protocol whenever Claude Code and Codex may work in the same repository.
+Use this protocol whenever Claude Code, Codex, or another agent runtime may work in the same repository.
 
 ## Conflict Prevention
 
@@ -954,6 +1096,281 @@ python scripts/compound_orchestrator.py release --tool codex --agent codex-worke
 """
 
 
+def verify_py_template() -> str:
+    return r"""
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+from typing import Dict, List, Optional
+
+
+MANAGED_START = "<!-- compound-orchestrator:start -->"
+MANAGED_END = "<!-- compound-orchestrator:end -->"
+CLAUDE_AGENT_TEAM_ENV = "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"
+
+REQUIRED_FILES = [
+    "README.md",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "CODEBASE_MAP.md",
+    "STRATEGY.md",
+    ".agent-loop/task-brief-template.md",
+    ".agent-loop/handoff-template.md",
+    ".agent-loop/review-rubric.md",
+    ".agent-loop/eval-scorecard.md",
+    ".agent-loop/harness-checklist.md",
+    ".agent-loop/module-claude-template.md",
+    ".agent-loop/path-scoped-skill-template.md",
+    ".agent-loop/lsp-mcp-roadmap.md",
+    ".agent-loop/harness-ownership.md",
+    ".agent-loop/team-topology.md",
+    ".agent-loop/codex-parallel-contract.md",
+    ".agent-loop/cross-tool-protocol.md",
+    ".agent-loop/readme-maintenance.md",
+    ".agent-loop/coordination/ownership.json",
+    ".claude/settings.json",
+    ".claude/commands/compound-start.md",
+    ".claude/commands/compound-plan.md",
+    ".claude/commands/compound-review.md",
+    ".claude/commands/compound-learn.md",
+    ".claude/commands/compound-init.md",
+    ".claude/commands/compound-team-start.md",
+    ".claude/commands/compound-harness-check.md",
+    ".claude/commands/compound-claim.md",
+    ".claude/commands/compound-release.md",
+    ".claude/commands/compound-ownership-status.md",
+    ".claude/commands/compound-cross-review.md",
+    ".claude/agents/compound-architect.md",
+    ".claude/agents/compound-reviewer.md",
+    ".claude/agents/compound-test-runner.md",
+    ".claude/agents/compound-cross-tool-reviewer.md",
+    "scripts/compound_orchestrator.py",
+    "scripts/verify.py",
+    "scripts/verify.ps1",
+    "scripts/verify.sh",
+]
+
+IGNORED_PARTS = {
+    ".git",
+    ".hg",
+    ".svn",
+    ".venv",
+    "__pycache__",
+    "node_modules",
+    "dist",
+    "build",
+    "coverage",
+    ".next",
+    "vendor",
+    "generated",
+}
+
+
+def normalize_scope_path(value: str) -> str:
+    value = value.strip().replace("\\", "/")
+    while "//" in value:
+        value = value.replace("//", "/")
+    if value.startswith("./"):
+        value = value[2:]
+    value = value.strip("/")
+    return value or "."
+
+
+def paths_overlap(left: str, right: str) -> bool:
+    left = normalize_scope_path(left)
+    right = normalize_scope_path(right)
+    if left == "." or right == ".":
+        return True
+    if "*" in left or "?" in left or "[" in left:
+        return left == right or right.startswith(left.split("*", 1)[0].rstrip("/") + "/")
+    if "*" in right or "?" in right or "[" in right:
+        return left == right or left.startswith(right.split("*", 1)[0].rstrip("/") + "/")
+    return left == right or left.startswith(right + "/") or right.startswith(left + "/")
+
+
+def load_json(path: Path, errors: List[str]) -> Optional[object]:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        errors.append(f"Invalid JSON in {path}: {exc}")
+    return None
+
+
+def verify_compound(root: Path) -> List[str]:
+    errors: List[str] = []
+
+    for item in REQUIRED_FILES:
+        if not (root / item).is_file():
+            errors.append(f"Missing required compound file: {item}")
+
+    for item in ["README.md", "AGENTS.md", "CLAUDE.md"]:
+        path = root / item
+        if path.exists():
+            text = path.read_text(encoding="utf-8")
+            if MANAGED_START not in text or MANAGED_END not in text:
+                errors.append(f"Missing managed compound block in {item}")
+
+    readme_policy = root / ".agent-loop/readme-maintenance.md"
+    if readme_policy.exists():
+        text = readme_policy.read_text(encoding="utf-8")
+        for phrase in ["Remove old information", "Keep unchanged information", "Add new content", "Reorganize"]:
+            if phrase not in text:
+                errors.append(f"README maintenance guide is missing policy phrase: {phrase}")
+
+    settings_path = root / ".claude/settings.json"
+    if settings_path.exists():
+        settings = load_json(settings_path, errors)
+        if isinstance(settings, dict):
+            env = settings.get("env")
+            if not isinstance(env, dict) or env.get(CLAUDE_AGENT_TEAM_ENV) != "1":
+                errors.append(f"Missing Claude agent team env flag: env.{CLAUDE_AGENT_TEAM_ENV} = \"1\"")
+            permissions = settings.get("permissions")
+            deny = permissions.get("deny") if isinstance(permissions, dict) else None
+            if not isinstance(deny, list) or not deny:
+                errors.append("Missing permissions.deny entries in .claude/settings.json")
+
+    ownership_path = root / ".agent-loop/coordination/ownership.json"
+    if ownership_path.exists():
+        ownership = load_json(ownership_path, errors)
+        if isinstance(ownership, dict):
+            claims = ownership.get("claims", [])
+            if not isinstance(claims, list):
+                errors.append(".agent-loop/coordination/ownership.json claims must be a list")
+                claims = []
+            active = [claim for claim in claims if isinstance(claim, dict) and claim.get("status") == "active"]
+            for index, left in enumerate(active):
+                for right in active[index + 1 :]:
+                    same_claimant = (
+                        left.get("tool") == right.get("tool")
+                        and left.get("agent") == right.get("agent")
+                        and left.get("task_id") == right.get("task_id")
+                    )
+                    if same_claimant:
+                        continue
+                    if paths_overlap(str(left.get("path", "")), str(right.get("path", ""))):
+                        errors.append(
+                            "Active ownership conflict: "
+                            f"{left.get('tool')}/{left.get('agent')} owns {left.get('path')} and "
+                            f"{right.get('tool')}/{right.get('agent')} owns {right.get('path')}"
+                        )
+        elif ownership is not None:
+            errors.append(".agent-loop/coordination/ownership.json must contain an object")
+
+    return errors
+
+
+def package_scripts(root: Path) -> Dict[str, str]:
+    package_path = root / "package.json"
+    if not package_path.exists():
+        return {}
+    try:
+        data = json.loads(package_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return {"__error__": f"Invalid JSON in package.json: {exc}"}
+    scripts = data.get("scripts", {})
+    return scripts if isinstance(scripts, dict) else {}
+
+
+def run_command(root: Path, command: List[str]) -> Optional[str]:
+    printable = " ".join(command)
+    print(f"running: {printable}")
+    try:
+        completed = subprocess.run(command, cwd=root, check=False)
+    except FileNotFoundError:
+        return f"Command not found: {command[0]}"
+    if completed.returncode != 0:
+        return f"Command failed ({completed.returncode}): {printable}"
+    return None
+
+
+def markdown_files(root: Path) -> List[Path]:
+    files: List[Path] = []
+    for path in root.rglob("*.md"):
+        relative_parts = path.relative_to(root).parts
+        if any(part in IGNORED_PARTS for part in relative_parts):
+            continue
+        files.append(path)
+    return files
+
+
+def scan_markdown_conflicts(root: Path) -> List[str]:
+    errors: List[str] = []
+    for path in markdown_files(root):
+        for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            stripped = line.strip()
+            if stripped.startswith("<<<<<<<") or stripped.startswith("=======") or stripped.startswith(">>>>>>>"):
+                errors.append(f"Merge conflict marker in {path.relative_to(root).as_posix()}:{line_number}")
+    return errors
+
+
+def verify_project(root: Path) -> List[str]:
+    errors: List[str] = []
+    scripts = package_scripts(root)
+    if "__error__" in scripts:
+        errors.append(scripts["__error__"])
+    else:
+        for script_name in ["lint", "typecheck", "test", "build"]:
+            if script_name in scripts:
+                npm_command = ["npm", "test"] if script_name == "test" else ["npm", "run", script_name]
+                error = run_command(root, npm_command)
+                if error:
+                    errors.append(error)
+
+    if (root / "tests").is_dir() or (root / "pyproject.toml").exists():
+        python = os.environ.get("PYTHON") or sys.executable
+        if (root / "tests").is_dir():
+            error = run_command(root, [python, "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py"])
+            if error:
+                errors.append(error)
+
+    errors.extend(scan_markdown_conflicts(root))
+    return errors
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Verify this project and its compound orchestration harness.")
+    parser.add_argument("--compound-only", action="store_true", help="Check only Compound Orchestrator files and claims.")
+    args = parser.parse_args()
+
+    root = Path(__file__).resolve().parents[1]
+    errors = verify_compound(root)
+    if not args.compound_only and not errors:
+        errors.extend(verify_project(root))
+
+    if errors:
+        print("verification: FAIL")
+        for error in errors:
+            print(f"  - {error}")
+        return 1
+
+    print("verification: PASS")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+"""
+
+
+def verify_sh_template() -> str:
+    return r"""
+#!/usr/bin/env sh
+set -eu
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+PYTHON=${PYTHON:-python3}
+
+cd "$ROOT"
+"$PYTHON" scripts/verify.py "$@"
+"""
+
+
 def verify_script_template() -> str:
     return r"""
 param(
@@ -965,60 +1382,24 @@ $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Push-Location $Root
 
 try {
-    Write-Host "Checking compound engineering structure..."
-    $required = @(
-        "AGENTS.md",
-        "CLAUDE.md",
-        "STRATEGY.md",
-        ".agent-loop/task-brief-template.md",
-        ".agent-loop/review-rubric.md",
-        ".agent-loop/eval-scorecard.md",
-        ".agent-loop/harness-checklist.md",
-        ".agent-loop/module-claude-template.md",
-        ".agent-loop/path-scoped-skill-template.md",
-        ".agent-loop/lsp-mcp-roadmap.md",
-        ".agent-loop/harness-ownership.md",
-        ".agent-loop/team-topology.md",
-        ".agent-loop/codex-parallel-contract.md",
-        ".agent-loop/cross-tool-protocol.md",
-        ".agent-loop/coordination/ownership.json",
-        "CODEBASE_MAP.md",
-        ".claude/settings.json",
-        ".claude/commands/compound-init.md",
-        ".claude/commands/compound-team-start.md"
-    )
-
-    foreach ($item in $required) {
-        if (-not (Test-Path -LiteralPath $item)) {
-            throw "Missing required compound file: $item"
-        }
+    if ($env:PYTHON) {
+        $Python = $env:PYTHON
+    }
+    elseif (Get-Command python -ErrorAction SilentlyContinue) {
+        $Python = "python"
+    }
+    else {
+        $Python = "python3"
     }
 
-    $settings = Get-Content -Raw ".claude/settings.json" | ConvertFrom-Json
-    if (-not $settings.env -or $settings.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS -ne "1") {
-        throw "Missing Claude agent-team flag in .claude/settings.json"
-    }
-    if (-not $settings.permissions -or -not $settings.permissions.deny -or $settings.permissions.deny.Count -eq 0) {
-        throw "Missing permissions.deny entries in .claude/settings.json"
-    }
-
+    $VerifyArgs = @("scripts/verify.py")
     if ($CompoundOnly) {
-        return
+        $VerifyArgs += "--compound-only"
     }
 
-    if (Test-Path -LiteralPath "package.json") {
-        $package = Get-Content -Raw "package.json" | ConvertFrom-Json
-        if ($package.scripts.lint) { npm run lint }
-        if ($package.scripts.typecheck) { npm run typecheck }
-        if ($package.scripts.test) { npm test }
-        if ($package.scripts.build) { npm run build }
-    }
-
-    if ((Test-Path -LiteralPath "pyproject.toml") -or (Test-Path -LiteralPath "tests")) {
-        $python = if ($env:PYTHON) { $env:PYTHON } else { "python" }
-        if (Test-Path -LiteralPath "tests") {
-            & $python -m unittest discover -s tests -p "test_*.py"
-        }
+    & $Python @VerifyArgs
+    if ($LASTEXITCODE -ne 0) {
+        throw "scripts/verify.py failed with exit code $LASTEXITCODE"
     }
 }
 finally {
@@ -1041,8 +1422,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/compound_orchestrator.py" init --target .
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/compound_orchestrator.py" check --target .
 ```
 
-Confirm that `.claude/settings.json` enables Claude Code agent teams with `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, and use `.agent-loop/codex-parallel-contract.md` for the matching Codex parallel-agent workflow.
-Also review `.agent-loop/harness-checklist.md` and `CODEBASE_MAP.md` so the codebase is navigable before adding MCP or LSP complexity.
+Confirm that `.claude/settings.json` enables Claude Code agent teams with `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, and use `.agent-loop/codex-parallel-contract.md` for the matching Codex or other-agent parallel workflow.
+Also review `.agent-loop/harness-checklist.md`, `.agent-loop/readme-maintenance.md`, and `CODEBASE_MAP.md` so the project is navigable before adding MCP or LSP complexity.
+The initialized project should be portable through `scripts/compound_orchestrator.py`, `scripts/verify.py`, `scripts/verify.ps1`, and `scripts/verify.sh`.
 """,
         ".claude/commands/compound-start.md": """
 # Compound Start
@@ -1052,10 +1434,10 @@ Create or update a task brief before implementation starts.
 Steps:
 
 1. Restate the goal and definition of done.
-2. Inspect `STRATEGY.md`, `AGENTS.md`, `CLAUDE.md`, and relevant `docs/patterns`, `docs/decisions`, and `docs/failures`.
+2. Inspect `STRATEGY.md`, `README.md`, `AGENTS.md`, `CLAUDE.md`, and relevant `docs/patterns`, `docs/decisions`, and `docs/failures`.
 3. Create a plan in `docs/plans/` using `.agent-loop/task-brief-template.md`.
 4. Identify parallel agent lanes only when they are independent.
-5. Stop before implementation if ownership or verification is unclear.
+5. Stop before implementation if ownership, verification, or README impact is unclear.
 """,
         ".claude/commands/compound-plan.md": """
 # Compound Plan
@@ -1064,8 +1446,9 @@ Turn the current task brief into an implementation plan.
 
 Include:
 
-- files likely to change
+- files, drafts, or artifacts likely to change
 - tests to add or run
+- README sections likely to change or a note that README is unaffected
 - risks and mitigations
 - agent lanes with disjoint ownership
 - completion gate checklist
@@ -1075,7 +1458,7 @@ Include:
 
 Review the current diff using `.agent-loop/review-rubric.md`.
 
-Lead with findings. Include file and line references when possible. Call out missing verification and any lesson that should become a durable compound note.
+Lead with findings. Include file and line references when possible. Call out missing verification, stale README content, and any lesson that should become a durable compound note.
 """,
         ".claude/commands/compound-learn.md": """
 # Compound Learn
@@ -1090,6 +1473,7 @@ Record at least one of:
 - task compound note in `docs/compound/`
 
 Update `AGENTS.md` and `CLAUDE.md` only when the lesson should affect all future work.
+Update `README.md` whenever setup, usage, workflow, architecture, outputs, manuscript structure, export process, or reader-facing behavior changed.
 """,
         ".claude/commands/compound-team-start.md": """
 # Compound Team Start
@@ -1124,7 +1508,7 @@ Keep the team to 3-5 teammates, wait for them to finish, synthesize findings, ru
         ".claude/commands/compound-harness-check.md": """
 # Compound Harness Check
 
-Audit this repository's large-codebase Claude/Codex harness.
+Audit this repository's cross-agent project harness.
 
 Run:
 
@@ -1132,12 +1516,12 @@ Run:
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/compound_orchestrator.py" harness-check --target .
 ```
 
-Summarize missing setup in priority order: navigation, layered `CLAUDE.md`, permissions deny rules, hooks, path-scoped skills, LSP/MCP roadmap, ownership, and review cadence.
+Summarize missing setup in priority order: navigation, README maintenance, layered `CLAUDE.md`, permissions deny rules, cross-platform verification, hooks, path-scoped skills, LSP/MCP roadmap, ownership, and review cadence.
 """,
         ".claude/commands/compound-claim.md": """
 # Compound Claim
 
-Claim files or directories before editing so Claude Code and Codex do not collide.
+Claim files, directories, drafts, or artifacts before editing so agent runtimes do not collide.
 
 Run:
 
@@ -1172,12 +1556,12 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/compound_orchestrator.py" ownership-statu
         ".claude/commands/compound-cross-review.md": """
 # Compound Cross Review
 
-Use this when Claude Code reviews Codex-authored changes.
+Use this when Claude Code reviews Codex-authored or other-agent-authored changes.
 
 Steps:
 
 1. Inspect active ownership with `compound-ownership-status`.
-2. Review only the Codex-authored diff or paths named by the lead.
+2. Review only the authoring agent's diff or paths named by the lead.
 3. Lead with findings ordered by severity.
 4. Write the result:
 
@@ -1216,21 +1600,23 @@ tools: Read, Grep, Glob, Bash
 ---
 
 You own verification. Find the closest meaningful tests, run them, diagnose failures, and recommend missing coverage. Do not broaden the test surface without explaining why.
+
+Prefer the generated cross-platform entrypoints when available: `python scripts/verify.py`, `sh scripts/verify.sh`, or `pwsh ./scripts/verify.ps1`.
 """,
         ".claude/agents/compound-cross-tool-reviewer.md": """
 ---
 name: compound-cross-tool-reviewer
-description: Reviews Codex-authored changes from the Claude Code side and checks for ownership conflicts.
+description: Reviews Codex-authored or other-agent-authored changes from the Claude Code side and checks for ownership conflicts.
 tools: Read, Grep, Glob, Bash
 ---
 
-You are the Claude-side cross-tool reviewer. Review code written by Codex or a Codex worker.
+You are the Claude-side cross-tool reviewer. Review work written by Codex or another agent runtime.
 
 Required checks:
 
 - Inspect `.agent-loop/coordination/ownership.json` for overlapping active claims.
-- Confirm Codex edited only claimed files.
-- Review correctness, tests, security, and maintainability.
+- Confirm the authoring agent edited only claimed files.
+- Review correctness, tests, security, maintainability, factual drift, README freshness, and writing clarity when relevant.
 - Do not edit files unless the lead explicitly assigns a patch and ownership has been claimed.
 - Write or request a cross-review artifact in `docs/cross-reviews/`.
 
@@ -1243,6 +1629,7 @@ def init_project(root: Path, *, force: bool = False) -> WriteReport:
     root = root.resolve()
     report = ensure_dirs(root)
 
+    report.extend(upsert_readme(root))
     report.extend(upsert_managed_block(root, "AGENTS.md", "Agent Instructions", common_protocol_block("Codex")))
     report.extend(upsert_managed_block(root, "CLAUDE.md", "Claude Instructions", common_protocol_block("Claude Code")))
     report.extend(merge_claude_settings(root))
@@ -1250,6 +1637,7 @@ def init_project(root: Path, *, force: bool = False) -> WriteReport:
     for relative, content in {
         "CODEBASE_MAP.md": codebase_map_template(),
         "STRATEGY.md": strategy_template(),
+        ".agent-loop/readme-maintenance.md": readme_maintenance_template(),
         ".agent-loop/task-brief-template.md": task_brief_template(),
         ".agent-loop/handoff-template.md": handoff_template(),
         ".agent-loop/review-rubric.md": review_rubric_template(),
@@ -1262,11 +1650,17 @@ def init_project(root: Path, *, force: bool = False) -> WriteReport:
         ".agent-loop/team-topology.md": team_topology_template(),
         ".agent-loop/codex-parallel-contract.md": codex_parallel_contract_template(),
         ".agent-loop/cross-tool-protocol.md": cross_tool_protocol_template(),
+        "scripts/verify.py": verify_py_template(),
         "scripts/verify.ps1": verify_script_template(),
+        "scripts/verify.sh": verify_sh_template(),
         **claude_command_templates(),
         **claude_agent_templates(),
     }.items():
         report.extend(write_file(root, relative, content, force=force))
+    report.extend(copy_orchestrator_script(root, force=force))
+    verify_sh = root / "scripts/verify.sh"
+    if verify_sh.exists():
+        verify_sh.chmod(verify_sh.stat().st_mode | 0o111)
     report.extend(save_ownership(root, load_ownership(root)))
 
     return report
@@ -1295,6 +1689,7 @@ Task id: `{task_id}`
 - [ ] Implement scoped change
 - [ ] Add or update verification
 - [ ] Review diff
+- [ ] Update README if project setup, usage, workflow, architecture, outputs, or audience-facing behavior changed
 - [ ] Write compound note
 
 ## Verification
@@ -1365,6 +1760,7 @@ Mode: `{mode}`
 - Codex reviews Claude-authored changes with `codex-cross-tool-reviewer`.
 - Teammates should share findings before implementation when coordination is needed.
 - The lead waits for teammates before final synthesis.
+- The lead keeps `README.md` current when the work changes setup, usage, workflow, architecture, outputs, or reader-facing behavior.
 
 ## Verification
 
@@ -1448,10 +1844,8 @@ def cross_review(
     summary: str,
     force: bool = False,
 ) -> Tuple[str, WriteReport]:
-    if reviewer_tool not in TOOL_CHOICES:
-        raise ValueError(f"reviewer_tool must be one of: {', '.join(TOOL_CHOICES)}")
-    if author_tool not in TOOL_CHOICES:
-        raise ValueError(f"author_tool must be one of: {', '.join(TOOL_CHOICES)}")
+    reviewer_tool = validate_tool_name(reviewer_tool, field="reviewer_tool")
+    author_tool = validate_tool_name(author_tool, field="author_tool")
     if reviewer_tool == author_tool:
         raise ValueError("cross-tool review requires different reviewer and author tools")
 
@@ -1504,10 +1898,12 @@ def check_project(root: Path, task_id: Optional[str] = None) -> Tuple[bool, List
             failures.append(f"Missing directory: {item}")
 
     required_files = [
+        "README.md",
         "AGENTS.md",
         "CLAUDE.md",
         "CODEBASE_MAP.md",
         "STRATEGY.md",
+        ".agent-loop/readme-maintenance.md",
         ".agent-loop/task-brief-template.md",
         ".agent-loop/handoff-template.md",
         ".agent-loop/review-rubric.md",
@@ -1522,7 +1918,10 @@ def check_project(root: Path, task_id: Optional[str] = None) -> Tuple[bool, List
         ".agent-loop/cross-tool-protocol.md",
         ".agent-loop/coordination/ownership.json",
         ".claude/settings.json",
+        "scripts/compound_orchestrator.py",
+        "scripts/verify.py",
         "scripts/verify.ps1",
+        "scripts/verify.sh",
         ".claude/commands/compound-start.md",
         ".claude/commands/compound-plan.md",
         ".claude/commands/compound-review.md",
@@ -1543,12 +1942,19 @@ def check_project(root: Path, task_id: Optional[str] = None) -> Tuple[bool, List
         if not (root / item).is_file():
             failures.append(f"Missing file: {item}")
 
-    for item in ["AGENTS.md", "CLAUDE.md"]:
+    for item in ["README.md", "AGENTS.md", "CLAUDE.md"]:
         path = root / item
         if path.exists():
             text = path.read_text(encoding="utf-8")
             if MANAGED_START not in text or MANAGED_END not in text:
                 failures.append(f"Missing managed compound block in {item}")
+
+    readme_policy = root / ".agent-loop/readme-maintenance.md"
+    if readme_policy.exists():
+        text = readme_policy.read_text(encoding="utf-8")
+        for phrase in ["Remove old information", "Keep unchanged information", "Add new content", "Reorganize"]:
+            if phrase not in text:
+                failures.append(f"README maintenance guide is missing policy phrase: {phrase}")
 
     settings = root / ".claude/settings.json"
     if settings.exists():
@@ -1656,6 +2062,7 @@ def hook_context(stdin_text: str) -> str:
         "- Use hooks for automatic behavior and path-scoped skills for specialized expertise.",
         "- Add MCP/LSP only after navigation, permissions, hooks, and ownership are healthy.",
         "- Before editing in mixed Claude/Codex work, claim files in .agent-loop/coordination/ownership.json.",
+        "- Keep README.md current when setup, usage, architecture, workflow, outputs, or reader-facing behavior changes.",
     ]
     if (root / "CODEBASE_MAP.md").exists():
         reminders.append("- Navigation map available: CODEBASE_MAP.md")
@@ -1663,6 +2070,8 @@ def hook_context(stdin_text: str) -> str:
         reminders.append("- Harness checklist available: .agent-loop/harness-checklist.md")
     if (root / ".agent-loop/lsp-mcp-roadmap.md").exists():
         reminders.append("- LSP/MCP roadmap available: .agent-loop/lsp-mcp-roadmap.md")
+    if (root / ".agent-loop/readme-maintenance.md").exists():
+        reminders.append("- README maintenance guide available: .agent-loop/readme-maintenance.md")
     return "\n".join(reminders)
 
 
@@ -1744,6 +2153,15 @@ def self_test(plugin_root: Path) -> Tuple[bool, List[str]]:
         ok, check_failures = check_project(target)
         if not ok:
             failures.extend(f"bootstrap check: {item}" for item in check_failures)
+        verifier = subprocess.run(
+            [sys.executable, str(target / "scripts/verify.py"), "--compound-only"],
+            cwd=target,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if verifier.returncode != 0:
+            failures.append(f"generated verifier failed: {verifier.stdout}{verifier.stderr}")
         audit_ok, audit_failures, _audit_warnings = harness_audit(target)
         if not audit_ok:
             failures.extend(f"harness audit: {item}" for item in audit_failures)
@@ -1840,7 +2258,7 @@ def build_parser() -> argparse.ArgumentParser:
     check_p.add_argument("--task-id", help="Require plan, review, and compound files for this task id.")
     check_p.add_argument("--json", action="store_true", help="Print JSON report.")
 
-    audit_p = sub.add_parser("harness-check", help="Audit large-codebase Claude/Codex harness readiness.")
+    audit_p = sub.add_parser("harness-check", help="Audit cross-agent project harness readiness.")
     audit_p.add_argument("--target", default=".", help="Project root to audit.")
     audit_p.add_argument("--json", action="store_true", help="Print JSON report.")
 
@@ -1866,7 +2284,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     claim_p = sub.add_parser("claim", help="Claim file ownership before Claude/Codex edits.")
     claim_p.add_argument("--target", default=".", help="Project root.")
-    claim_p.add_argument("--tool", required=True, choices=TOOL_CHOICES, help="Tool claiming ownership.")
+    claim_p.add_argument(
+        "--tool",
+        required=True,
+        help=f"Agent runtime claiming ownership, for example: {', '.join(SUGGESTED_TOOL_NAMES)}.",
+    )
     claim_p.add_argument("--agent", required=True, help="Agent or teammate name.")
     claim_p.add_argument("--task-id", required=True, help="Task id.")
     claim_p.add_argument("--paths", nargs="+", required=True, help="Files, directories, or globs to claim.")
@@ -1876,7 +2298,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     release_p = sub.add_parser("release", help="Release file ownership claims.")
     release_p.add_argument("--target", default=".", help="Project root.")
-    release_p.add_argument("--tool", choices=TOOL_CHOICES, help="Tool to release.")
+    release_p.add_argument("--tool", help=f"Agent runtime to release, for example: {', '.join(SUGGESTED_TOOL_NAMES)}.")
     release_p.add_argument("--agent", help="Agent or teammate name to release.")
     release_p.add_argument("--task-id", help="Task id to release.")
     release_p.add_argument("--paths", nargs="+", help="Specific paths to release.")
@@ -1889,8 +2311,8 @@ def build_parser() -> argparse.ArgumentParser:
     cross_p = sub.add_parser("cross-review", help="Record a Claude/Codex cross-tool review artifact.")
     cross_p.add_argument("--target", default=".", help="Project root.")
     cross_p.add_argument("--task-id", required=True, help="Task id.")
-    cross_p.add_argument("--reviewer-tool", required=True, choices=TOOL_CHOICES, help="Tool doing the review.")
-    cross_p.add_argument("--author-tool", required=True, choices=TOOL_CHOICES, help="Tool whose code is being reviewed.")
+    cross_p.add_argument("--reviewer-tool", required=True, help="Agent runtime doing the review.")
+    cross_p.add_argument("--author-tool", required=True, help="Agent runtime whose work is being reviewed.")
     cross_p.add_argument("--summary", required=True, help="Review summary.")
     cross_p.add_argument("--force", action="store_true", help="Overwrite existing review artifact.")
     cross_p.add_argument("--json", action="store_true", help="Print JSON report.")

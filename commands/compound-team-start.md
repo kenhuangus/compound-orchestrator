@@ -1,6 +1,6 @@
 ---
 name: compound-team-start
-description: Start a Claude Code agent team or Codex parallel-agent run with shared ownership and learning gates.
+description: Start a Claude Code agent team, Codex parallel-agent run, or compatible agent-team workflow with shared ownership and learning gates.
 allowed-tools: Read, Grep, Glob, Bash, Write
 ---
 
@@ -22,4 +22,4 @@ Only add an implementer teammate if the write scope is disjoint and clear.
 Keep the team to 3-5 teammates, wait for them to finish, synthesize findings, run verification, and write a compound note.
 ```
 
-If running the same shape in Codex, use `.agent-loop/codex-parallel-contract.md` and keep the lead session responsible for decomposition, integration, verification, and the final compound note.
+If running the same shape in Codex or another agent runtime, use `.agent-loop/codex-parallel-contract.md` and keep the lead session responsible for decomposition, disjoint ownership, integration, verification, README updates when relevant, and the final compound note.

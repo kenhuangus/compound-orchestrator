@@ -1,6 +1,6 @@
 ---
 name: compound-ownership-status
-description: Show active Claude/Codex ownership claims for conflict avoidance.
+description: Show active cross-agent ownership claims for conflict avoidance.
 allowed-tools: Bash, Read
 ---
 

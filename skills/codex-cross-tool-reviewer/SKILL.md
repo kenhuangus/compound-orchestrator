@@ -1,18 +1,18 @@
 ---
 name: codex-cross-tool-reviewer
-description: Use when Codex reviews Claude Code-authored changes or verifies Claude/Codex ownership claims before integration.
+description: Use when Codex reviews Claude Code-authored or other-agent-authored changes and verifies ownership claims before integration.
 ---
 
 # Codex Cross-Tool Reviewer
 
-Use this skill when Codex is asked to review code written by Claude Code or a Claude teammate.
+Use this skill when Codex is asked to review work written by Claude Code or another agent runtime.
 
 ## Required Checks
 
 1. Inspect `.agent-loop/coordination/ownership.json`.
-2. Confirm Claude Code edited only claimed files.
-3. Check for active overlapping claims between Claude and Codex.
-4. Review correctness, security, tests, and maintainability.
+2. Confirm the authoring agent edited only claimed files.
+3. Check for active overlapping claims between agent runtimes.
+4. Review correctness, security, tests, maintainability, factual drift, README freshness, and writing clarity when relevant.
 5. Record the result with:
 
 ```powershell

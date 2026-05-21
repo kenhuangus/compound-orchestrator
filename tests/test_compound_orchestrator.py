@@ -1,5 +1,6 @@
 import datetime as dt
 import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -21,7 +22,9 @@ class CompoundOrchestratorTests(unittest.TestCase):
             ok, failures = co.check_project(root)
 
             self.assertTrue(ok, failures)
+            self.assertIn("README.md", report.created)
             self.assertIn("AGENTS.md", report.created)
+            self.assertTrue((root / "README.md").is_file())
             self.assertTrue((root / ".claude/commands/compound-init.md").is_file())
             self.assertTrue((root / ".claude/commands/compound-start.md").is_file())
             self.assertTrue((root / ".claude/commands/compound-team-start.md").is_file())
@@ -32,6 +35,7 @@ class CompoundOrchestratorTests(unittest.TestCase):
             self.assertTrue((root / ".claude/agents/compound-cross-tool-reviewer.md").is_file())
             self.assertTrue((root / "CODEBASE_MAP.md").is_file())
             self.assertTrue((root / ".agent-loop/harness-checklist.md").is_file())
+            self.assertTrue((root / ".agent-loop/readme-maintenance.md").is_file())
             self.assertTrue((root / ".agent-loop/module-claude-template.md").is_file())
             self.assertTrue((root / ".agent-loop/path-scoped-skill-template.md").is_file())
             self.assertTrue((root / ".agent-loop/lsp-mcp-roadmap.md").is_file())
@@ -40,28 +44,36 @@ class CompoundOrchestratorTests(unittest.TestCase):
             self.assertTrue((root / ".agent-loop/codex-parallel-contract.md").is_file())
             self.assertTrue((root / ".agent-loop/cross-tool-protocol.md").is_file())
             self.assertTrue((root / ".agent-loop/coordination/ownership.json").is_file())
+            self.assertTrue((root / "scripts/compound_orchestrator.py").is_file())
+            self.assertTrue((root / "scripts/verify.py").is_file())
             self.assertTrue((root / "scripts/verify.ps1").is_file())
+            self.assertTrue((root / "scripts/verify.sh").is_file())
             settings = json.loads((root / ".claude/settings.json").read_text(encoding="utf-8"))
             self.assertEqual(settings["env"][co.CLAUDE_AGENT_TEAM_ENV], "1")
             for deny_rule in co.DEFAULT_PERMISSION_DENY:
                 self.assertIn(deny_rule, settings["permissions"]["deny"])
             self.assertIn(co.MANAGED_START, (root / "AGENTS.md").read_text(encoding="utf-8"))
             self.assertIn(co.MANAGED_START, (root / "CLAUDE.md").read_text(encoding="utf-8"))
+            self.assertIn(co.MANAGED_START, (root / "README.md").read_text(encoding="utf-8"))
 
     def test_init_preserves_existing_docs_and_appends_managed_blocks(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "AGENTS.md").write_text("# Existing Agents\n\nKeep this line.\n", encoding="utf-8")
             (root / "CLAUDE.md").write_text("# Existing Claude\n\nKeep this too.\n", encoding="utf-8")
+            (root / "README.md").write_text("# Existing README\n\nKeep this readme line.\n", encoding="utf-8")
 
             co.init_project(root)
 
             agents = (root / "AGENTS.md").read_text(encoding="utf-8")
             claude = (root / "CLAUDE.md").read_text(encoding="utf-8")
+            readme = (root / "README.md").read_text(encoding="utf-8")
             self.assertIn("Keep this line.", agents)
             self.assertIn("Keep this too.", claude)
+            self.assertIn("Keep this readme line.", readme)
             self.assertIn(co.MANAGED_START, agents)
             self.assertIn(co.MANAGED_END, claude)
+            self.assertIn(co.MANAGED_START, readme)
 
     def test_init_preserves_existing_claude_settings_env(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -198,6 +210,24 @@ class CompoundOrchestratorTests(unittest.TestCase):
             )
             self.assertEqual(co.active_claims(root)[0]["tool"], "codex")
 
+    def test_claims_accept_other_agent_runtime_labels(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            co.init_project(root)
+
+            co.claim_scope(root, tool="cursor", agent="cursor-worker", task_id="task-other", paths=["drafts/chapter.md"])
+            with self.assertRaises(co.OwnershipConflict):
+                co.claim_scope(root, tool="aider", agent="aider-worker", task_id="task-other", paths=["drafts/chapter.md"])
+
+            review_path, _ = co.cross_review(
+                root,
+                task_id="task-other",
+                reviewer_tool="codex",
+                author_tool="cursor",
+                summary="Codex reviewed Cursor-authored writing changes.",
+            )
+            self.assertTrue((root / review_path).is_file())
+
     def test_directory_claim_blocks_nested_file_claim(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -311,6 +341,32 @@ class CompoundOrchestratorTests(unittest.TestCase):
             released, _ = co.release_scope(root, task_id=task_id)
             self.assertEqual(released, 2)
             self.assertEqual(co.active_claims(root), [])
+
+            result = subprocess.run(
+                [sys.executable, str(root / "scripts/verify.py")],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_generated_verifier_runs_for_writing_project(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "drafts").mkdir()
+            (root / "drafts/chapter.md").write_text("# Chapter\n\nA short draft without conflict markers.\n", encoding="utf-8")
+
+            co.init_project(root)
+            result = subprocess.run(
+                [sys.executable, str(root / "scripts/verify.py"), "--compound-only"],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_harness_audit_passes_with_warnings_for_template_fields(self):
         with tempfile.TemporaryDirectory() as tmp:

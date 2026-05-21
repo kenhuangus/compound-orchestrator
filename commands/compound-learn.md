@@ -15,6 +15,8 @@ Record at least one of:
 
 Update `AGENTS.md` and `CLAUDE.md` only when the lesson should affect all future work.
 
+Update `README.md` when the task changed setup, usage, architecture, workflow, generated outputs, public behavior, manuscript structure, export process, or review workflow. Remove stale information, keep still-true information, add the new content, and reorganize the README so it stays easy to follow.
+
 Before declaring done, run:
 
 ```bash

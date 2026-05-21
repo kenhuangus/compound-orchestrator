@@ -1,126 +1,148 @@
 # Compound Orchestrator
 
-Compound Orchestrator is a small Codex and Claude Code plugin plus project bootstrapper for running a consistent compound engineering loop across both tools.
+Compound Orchestrator is a reusable plugin and project bootstrapper for making agent-assisted work compound over time. It installs a shared harness for coding, writing, research, documentation, and mixed projects so every meaningful task leaves behind a plan, review, verification trail, ownership record, README update when relevant, and durable learning for the next task.
 
-It complements the EveryInc Compound Engineering plugin by adding project-level guardrails:
+It works across Windows, macOS, Linux, and WSL. Claude Code and Codex get first-class support, and any other agent runtime can participate by using the same generated CLI, ownership file, review rubric, and cross-platform verifier.
 
-- shared Codex and Claude Code operating memory
-- Claude slash-command and subagent templates
-- Claude Code agent-team enablement
-- a Codex parallel-agent contract that mirrors the same team topology
-- large-codebase harness templates for layered `CLAUDE.md`, navigation, ownership, LSP/MCP rollout, and path-scoped skills
-- Claude Code hooks for session-start context reminders and stop-time durable-learning prompts
-- cross-tool ownership claims so Claude Code and Codex do not edit overlapping files at the same time
-- Claude and Codex cross-review roles so each tool can review code authored by the other
-- task brief, review, handoff, and scorecard templates
-- a verification adapter
-- a completion gate that checks for plan, review, and compound artifacts
+## What It Gives You
 
-## Loop
+- `README.md` maintenance policy for keeping project docs current instead of stale.
+- `AGENTS.md` and `CLAUDE.md` managed protocol blocks for shared agent behavior.
+- Claude Code slash commands, subagent definitions, hooks, and agent-team enablement.
+- A Codex parallel-agent contract that mirrors the Claude team topology.
+- Generic ownership claims so Claude Code, Codex, Cursor, Aider, CI agents, or future tools can avoid overlapping edits.
+- Cross-tool review roles so one agent runtime reviews work authored by another.
+- Project maps, task briefs, review rubrics, handoff templates, scorecards, and durable learning folders.
+- Portable generated scripts: `scripts/compound_orchestrator.py`, `scripts/verify.py`, `scripts/verify.ps1`, and `scripts/verify.sh`.
+
+## Supported Work
+
+Use this plugin for:
+
+- Coding projects: apps, libraries, services, monorepos, scripts, tests, and deployment workflows.
+- Writing projects: essays, reports, manuscripts, chapters, documentation sites, source notes, and export workflows.
+- Research or mixed projects: analysis, notebooks, docs, code, reviews, and artifacts that need coordinated agent work.
+
+The core loop is:
 
 ```text
 brainstorm -> plan -> work -> review -> compound -> repeat
 ```
 
-The important part is the final step. Every meaningful task should leave behind a reusable pattern, decision, failure note, or scorecard entry so the next task starts stronger.
+The final step is the point. Each completed task should improve the next task by recording a reusable pattern, decision, failure note, review, or compound note.
 
 ## Install Into A Project
 
-From this plugin directory:
+From this plugin directory on Windows PowerShell:
 
 ```powershell
-$py = "C:\Users\kenhu\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
+$py = "python"
 & $py .\scripts\compound_orchestrator.py init --target "C:\path\to\project"
 & $py .\scripts\compound_orchestrator.py check --target "C:\path\to\project"
 ```
 
-The initializer is conservative. It creates missing files and directories, and it appends managed compound-engineering blocks to existing `AGENTS.md` and `CLAUDE.md` instead of replacing them.
+If `python` is not configured on Windows, point `$py` at a virtualenv, system Python, or bundled agent runtime Python.
 
-It also merges the Claude Code agent-team flag into `.claude/settings.json`:
+From macOS, Linux, or WSL:
 
-```json
-{
-  "env": {
-    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
-  },
-  "permissions": {
-    "deny": [
-      "Read(./.env)",
-      "Read(./node_modules/**)",
-      "Read(./dist/**)"
-    ]
-  }
-}
+```bash
+python3 scripts/compound_orchestrator.py init --target /path/to/project
+python3 scripts/compound_orchestrator.py check --target /path/to/project
 ```
 
-The generated deny list also covers common build, coverage, generated, vendor, sourcemap, and minified JavaScript paths.
+The initializer is conservative. It creates missing files, appends managed blocks to existing `README.md`, `AGENTS.md`, and `CLAUDE.md`, and preserves local content unless `--force` is used for generated files.
 
-## Daily Use
+After initialization, the target project is portable. Agents can run the copied project-local CLI:
+
+```bash
+python3 scripts/compound_orchestrator.py check --target .
+python3 scripts/verify.py
+```
+
+## README Maintenance
+
+`README.md` is part of the product. Update it whenever setup, usage, architecture, workflow, commands, generated outputs, public behavior, manuscript structure, export process, or review workflow changes.
+
+Every README update should:
+
+1. Remove old information that is no longer true.
+2. Keep unchanged information that is still useful.
+3. Add the new information readers need.
+4. Reorganize the README so it is easy to follow and reflects the latest project state.
+
+The plugin installs this rule into generated projects through both the managed README block and `.agent-loop/readme-maintenance.md`.
+
+## Daily Workflow
 
 Start a task:
 
-```powershell
-& $py .\scripts\compound_orchestrator.py start --target . --title "Add billing webhook retry handling"
+```bash
+python3 scripts/compound_orchestrator.py start --target . --title "Add billing webhook retry handling"
 ```
 
-Record a durable learning:
+Start a team run:
 
-```powershell
-& $py .\scripts\compound_orchestrator.py learn --target . --kind failure --title "Webhook duplicate invoice" --summary "Provider retries can arrive after our DB write succeeds. Future webhook handlers must use idempotency keys."
+```bash
+python3 scripts/compound_orchestrator.py team-start --target . --title "Refactor checkout flow" --mode codex-parallel-agents
 ```
 
-Check completion gates:
+Claim files or artifacts before editing:
 
-```powershell
-& $py .\scripts\compound_orchestrator.py check --target . --task-id 2026-05-21-add-billing-webhook-retry-handling
+```bash
+python3 scripts/compound_orchestrator.py claim --target . --tool codex --agent codex-worker --task-id TASK --paths src/payment.py --intent "Implement retry handling"
 ```
 
-Audit the harness:
+Use any lowercase runtime label for `--tool`, such as `claude`, `codex`, `cursor`, `aider`, or `ci`. A claim fails if another active agent owns an overlapping path.
 
-```powershell
-& $py .\scripts\compound_orchestrator.py harness-check --target .
-```
+Release claims after integration or handoff:
 
-Claim files before editing:
-
-```powershell
-& $py .\scripts\compound_orchestrator.py claim --target . --tool codex --agent codex-worker --task-id 2026-05-21-task --paths src/payment.py --intent "Implement retry handling"
-```
-
-If Claude Code or another Codex agent already owns an overlapping path, the claim fails and the agent must not edit. Release claims after integration or handoff:
-
-```powershell
-& $py .\scripts\compound_orchestrator.py release --target . --tool codex --agent codex-worker --task-id 2026-05-21-task
+```bash
+python3 scripts/compound_orchestrator.py release --target . --tool codex --agent codex-worker --task-id TASK
 ```
 
 Record opposite-tool review:
 
-```powershell
-& $py .\scripts\compound_orchestrator.py cross-review --target . --task-id 2026-05-21-task --reviewer-tool claude --author-tool codex --summary "Claude reviewed Codex-authored retry handling."
+```bash
+python3 scripts/compound_orchestrator.py cross-review --target . --task-id TASK --reviewer-tool claude --author-tool codex --summary "Claude reviewed Codex-authored retry handling."
 ```
 
-Start a coordinated team run:
+Record durable learning:
 
-```powershell
-& $py .\scripts\compound_orchestrator.py team-start --target . --title "Refactor checkout flow" --mode claude-agent-team
+```bash
+python3 scripts/compound_orchestrator.py learn --target . --kind failure --title "Webhook duplicate invoice" --summary "Provider retries can arrive after the DB write succeeds. Future handlers must use idempotency keys."
 ```
 
-For Codex, use the same topology but make Codex the lead integrator:
+## Verification
+
+Generated projects get three platform entrypoints:
+
+```bash
+python3 scripts/verify.py
+sh scripts/verify.sh
+```
 
 ```powershell
-& $py .\scripts\compound_orchestrator.py team-start --target . --title "Refactor checkout flow" --mode codex-parallel-agents
+.\scripts\verify.ps1
+```
+
+The verifier checks compound files, README maintenance markers, Claude agent-team settings, ownership conflicts, Markdown conflict markers, Python unittest suites, and common npm scripts when present.
+
+Use `--compound-only` when you want to verify only the harness:
+
+```bash
+python3 scripts/verify.py --compound-only
 ```
 
 ## Claude Code
 
-This repository includes a native Claude Code plugin manifest at `.claude-plugin/plugin.json`. For local testing:
+The Claude plugin manifest is `.claude-plugin/plugin.json`. Local validation:
 
 ```bash
-claude --plugin-dir . -p "Use /compound-init to explain how this repo bootstraps compound engineering."
 claude plugin validate .
+claude --plugin-dir . plugin details compound-orchestrator
 ```
 
-`init` also creates project-local `.claude/commands` and `.claude/agents` templates. They provide a stable Claude-side vocabulary:
+The initializer writes project-local `.claude/commands` and `.claude/agents` templates, including:
 
 - `/compound-start`
 - `/compound-plan`
@@ -138,29 +160,54 @@ claude plugin validate .
 - `compound-test-runner`
 - `compound-cross-tool-reviewer`
 
-Claude Code agent teams are experimental and disabled by default, so `init` writes the required project setting. The runtime team config is still created and managed by Claude Code under `~/.claude/teams/`; this plugin only enables the feature and supplies reusable teammate roles plus the shared topology in `.agent-loop/team-topology.md`.
+It also enables Claude Code agent teams by merging `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` into `.claude/settings.json`. Claude still owns its runtime team files under `~/.claude/teams/`; this plugin supplies the project harness and reusable teammate roles.
 
-The plugin also ships hooks in `hooks/hooks.json`. `SessionStart` injects a short harness reminder, and `Stop` asks whether the session learned anything durable that should be captured in `CLAUDE.md` or durable docs before ending.
+## Codex And Other Agents
 
-## Codex
+Codex uses `skills/compound-orchestrator/SKILL.md` and `skills/codex-cross-tool-reviewer/SKILL.md` to follow the same loop. For parallel work, Codex acts as the lead integrator, spawns bounded explorer/worker/reviewer agents when useful, claims disjoint write scopes, integrates results, verifies, and writes the compound note.
 
-The Codex skill in `skills/compound-orchestrator/SKILL.md` teaches Codex to use the same loop and the same artifacts. Codex remains responsible for respecting local workspace safety, test execution, and agent-spawn rules.
+Other agents can participate by following the generated project files:
 
-For Codex multi-agent work, use `.agent-loop/codex-parallel-contract.md`. Codex does not share Claude's runtime team mailbox, so the lead Codex session acts as the hub: it spawns bounded explorer/worker/reviewer agents, prevents same-file ownership conflicts, integrates results, verifies, and writes the compound note.
+- `AGENTS.md`
+- `CODEBASE_MAP.md`
+- `.agent-loop/team-topology.md`
+- `.agent-loop/codex-parallel-contract.md`
+- `.agent-loop/cross-tool-protocol.md`
+- `.agent-loop/coordination/ownership.json`
+- `.agent-loop/review-rubric.md`
+- `.agent-loop/readme-maintenance.md`
 
-The generated `AGENTS.md`, `CODEBASE_MAP.md`, and `.agent-loop/harness-checklist.md` bring the same large-codebase harness rules to Codex: keep root context lean, layer local conventions deeper, deny noisy generated paths, and promote repeated instructions into skills or hooks.
+They do not need Claude's runtime team mailbox or Codex's chat interface. They only need to respect the shared claims, artifacts, verifier, and review gate.
 
-Codex also gets a `codex-cross-tool-reviewer` skill. Use it when Codex reviews Claude Code-authored changes before integration.
+## Commands
 
-## Test
+| Command | Purpose |
+| --- | --- |
+| `init` | Install the project harness. |
+| `check` | Check required files, managed blocks, settings, ownership, and optional task gates. |
+| `harness-check` | Audit project readiness for scalable agent work. |
+| `start` | Create brainstorm and plan artifacts for one task. |
+| `team-start` | Create artifacts for a Claude or Codex multi-agent run. |
+| `claim` | Claim files, directories, drafts, or artifacts before editing. |
+| `release` | Release active ownership claims. |
+| `ownership-status` | Show active claims and conflicts. |
+| `cross-review` | Record a review by one runtime of another runtime's work. |
+| `learn` | Write a durable pattern, decision, failure, review, or compound note. |
+| `self-test` | Validate this plugin package and generated project behavior. |
+
+## Test This Plugin
+
+Windows:
 
 ```powershell
-$py = "C:\Users\kenhu\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
+$py = "python"
 & .\scripts\verify_plugin.ps1 -Python $py
 ```
 
-WSL/Linux:
+macOS, Linux, or WSL:
 
 ```bash
 PYTHON=python3 ./scripts/verify_plugin.sh
 ```
+
+The plugin repository is public at [github.com/kenhuangus/compound-orchestrator](https://github.com/kenhuangus/compound-orchestrator).

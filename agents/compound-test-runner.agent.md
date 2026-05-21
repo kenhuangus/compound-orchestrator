@@ -13,7 +13,9 @@ You own verification. Find the closest meaningful tests, run them, diagnose fail
 Prefer project verification scripts, especially:
 
 ```bash
-./scripts/verify.ps1
+python3 scripts/verify.py
+sh scripts/verify.sh
+pwsh ./scripts/verify.ps1
 python3 scripts/compound_orchestrator.py check --target .
 ```
 

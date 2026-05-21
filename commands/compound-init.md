@@ -1,6 +1,6 @@
 ---
 name: compound-init
-description: Initialize the current repository for consistent Codex and Claude Code compound engineering.
+description: Initialize the current repository for cross-platform compound engineering across agents.
 allowed-tools: Bash, Read, Write
 ---
 
@@ -19,4 +19,6 @@ Then summarize the created files and the daily loop:
 brainstorm -> plan -> work -> review -> compound
 ```
 
-Also confirm that `.claude/settings.json` enables Claude Code agent teams with `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, and point Codex users to `.agent-loop/codex-parallel-contract.md` for the matching parallel-agent workflow.
+Also confirm that `.claude/settings.json` enables Claude Code agent teams with `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, `README.md` contains the managed maintenance policy, and generated projects have `scripts/compound_orchestrator.py`, `scripts/verify.py`, `scripts/verify.ps1`, and `scripts/verify.sh`.
+
+Point Codex and other agent users to `.agent-loop/codex-parallel-contract.md`, `.agent-loop/cross-tool-protocol.md`, and `.agent-loop/readme-maintenance.md`.

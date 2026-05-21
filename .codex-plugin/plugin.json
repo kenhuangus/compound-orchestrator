@@ -1,7 +1,7 @@
 {
   "name": "compound-orchestrator",
-  "version": "0.1.0",
-  "description": "Installs and enforces a compound engineering loop across Codex and Claude Code projects.",
+  "version": "0.2.0",
+  "description": "Installs and enforces a cross-platform compound engineering loop for coding, writing, research, and documentation projects.",
   "author": {
     "name": "Ken Huang",
     "email": "kenhuangus@users.noreply.github.com",
@@ -14,14 +14,16 @@
     "compound-engineering",
     "codex",
     "claude-code",
+    "writing",
+    "cross-platform",
     "agent-teams",
     "workflow"
   ],
   "skills": "./skills/",
   "interface": {
     "displayName": "Compound Orchestrator",
-    "shortDescription": "Enforce plan, review, and compounding loops across coding agents.",
-    "longDescription": "Compound Orchestrator installs shared Codex and Claude Code project memory, workflow commands, review rubrics, and verification gates so every project task leaves durable knowledge for the next one.",
+    "shortDescription": "Enforce plan, review, README, and compounding loops across agents.",
+    "longDescription": "Compound Orchestrator installs shared project memory, workflow commands, review rubrics, ownership claims, README maintenance, and cross-platform verification gates so coding and writing tasks leave durable knowledge for the next one.",
     "developerName": "Ken Huang",
     "category": "Productivity",
     "capabilities": [

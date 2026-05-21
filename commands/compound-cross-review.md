@@ -1,10 +1,10 @@
 ---
 name: compound-cross-review
-description: Review Codex-authored changes from Claude Code and record a cross-tool review.
+description: Review Codex-authored or other-agent-authored changes from Claude Code and record a cross-tool review.
 allowed-tools: Read, Grep, Glob, Bash
 ---
 
-Use this when Claude Code reviews Codex-authored changes.
+Use this when Claude Code reviews Codex-authored or other-agent-authored changes.
 
 1. Inspect active claims:
 
@@ -12,7 +12,7 @@ Use this when Claude Code reviews Codex-authored changes.
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/compound_orchestrator.py" ownership-status --target .
 ```
 
-2. Review the Codex-authored diff or paths assigned by the lead.
+2. Review the authoring agent's diff or paths assigned by the lead.
 3. Record the review:
 
 ```bash
