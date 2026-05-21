@@ -1,0 +1,13 @@
+[project]
+name = "compound-orchestrator"
+version = "0.1.0"
+description = "Project bootstrapper for a Codex and Claude Code compound engineering loop."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Ken Huang", email = "kenhuangus@users.noreply.github.com" }]
+keywords = ["compound-engineering", "codex", "claude-code", "agents"]
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/kenhuangus/compound-orchestrator"

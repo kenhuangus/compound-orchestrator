@@ -1,0 +1,42 @@
+{
+  "name": "compound-orchestrator",
+  "version": "0.1.0",
+  "description": "Installs and enforces a compound engineering loop across Codex and Claude Code projects.",
+  "author": {
+    "name": "Ken Huang",
+    "email": "kenhuangus@users.noreply.github.com",
+    "url": "https://github.com/kenhuangus"
+  },
+  "homepage": "https://github.com/kenhuangus/compound-orchestrator",
+  "repository": "https://github.com/kenhuangus/compound-orchestrator",
+  "license": "MIT",
+  "keywords": [
+    "compound-engineering",
+    "codex",
+    "claude-code",
+    "agent-teams",
+    "workflow"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Compound Orchestrator",
+    "shortDescription": "Enforce plan, review, and compounding loops across coding agents.",
+    "longDescription": "Compound Orchestrator installs shared Codex and Claude Code project memory, workflow commands, review rubrics, and verification gates so every project task leaves durable knowledge for the next one.",
+    "developerName": "Ken Huang",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write",
+      "Code"
+    ],
+    "websiteURL": "https://github.com/kenhuangus/compound-orchestrator",
+    "privacyPolicyURL": "https://github.com/kenhuangus/compound-orchestrator",
+    "termsOfServiceURL": "https://github.com/kenhuangus/compound-orchestrator",
+    "defaultPrompt": [
+      "Set up compound engineering for this repo.",
+      "Check whether this task is ready to finish.",
+      "Record the learning from this feature."
+    ],
+    "brandColor": "#2563EB"
+  }
+}

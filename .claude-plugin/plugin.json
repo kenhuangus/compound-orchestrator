@@ -1,0 +1,20 @@
+{
+  "name": "compound-orchestrator",
+  "version": "0.1.0",
+  "description": "Enforce a compound engineering loop across Claude Code and Codex projects.",
+  "author": {
+    "name": "Ken Huang",
+    "email": "kenhuangus@users.noreply.github.com",
+    "url": "https://github.com/kenhuangus"
+  },
+  "homepage": "https://github.com/kenhuangus/compound-orchestrator",
+  "repository": "https://github.com/kenhuangus/compound-orchestrator",
+  "license": "MIT",
+  "keywords": [
+    "compound-engineering",
+    "claude-code",
+    "codex",
+    "agent-teams",
+    "workflow"
+  ]
+}
