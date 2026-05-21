@@ -34,6 +34,21 @@ REQUIRED_DIRS = [
 
 CLAUDE_AGENT_TEAM_ENV = "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"
 
+DEFAULT_PERMISSION_DENY = [
+    "Read(./.env)",
+    "Read(./.env.*)",
+    "Read(./.git/**)",
+    "Read(./node_modules/**)",
+    "Read(./dist/**)",
+    "Read(./build/**)",
+    "Read(./coverage/**)",
+    "Read(./.next/**)",
+    "Read(./vendor/**)",
+    "Read(./generated/**)",
+    "Read(./**/*.min.js)",
+    "Read(./**/*.map)",
+]
+
 KIND_TO_DIR = {
     "brainstorm": "docs/brainstorms",
     "plan": "docs/plans",
@@ -158,6 +173,23 @@ def merge_claude_settings(root: Path) -> WriteReport:
     env[CLAUDE_AGENT_TEAM_ENV] = "1"
     data["env"] = env
 
+    permissions = data.get("permissions")
+    if permissions is None:
+        permissions = {}
+    if not isinstance(permissions, dict):
+        raise ValueError(f"{relative}.permissions must be a JSON object when present")
+
+    deny = permissions.get("deny")
+    if deny is None:
+        deny = []
+    if not isinstance(deny, list):
+        raise ValueError(f"{relative}.permissions.deny must be a JSON array when present")
+    for item in DEFAULT_PERMISSION_DENY:
+        if item not in deny:
+            deny.append(item)
+    permissions["deny"] = deny
+    data["permissions"] = permissions
+
     return write_json_file(root, relative, data)
 
 
@@ -215,6 +247,14 @@ Parallel agent policy:
 - Avoid parallel edits to the same file unless a lead integrator owns the final merge.
 - Claude Code should use agent teams when work benefits from teammate-to-teammate coordination.
 - Codex should mirror the same team shape with a lead-integrator hub plus explorer/worker/reviewer agents; workers must have disjoint write scopes.
+
+Large-codebase harness rules:
+
+- Keep root `CLAUDE.md` short: big picture, navigation pointers, and critical gotchas only.
+- Put local build/test/lint commands in subdirectory `CLAUDE.md` files.
+- Start Claude Code in the subdirectory where work is happening; parent `CLAUDE.md` files still load.
+- Move repeated procedural instructions into path-scoped skills instead of bloating `CLAUDE.md`.
+- Prefer hooks over "always remember to..." instructions when behavior should be automatic.
 """
 
 
@@ -240,6 +280,7 @@ def strategy_template() -> str:
 - Prefer project patterns over new abstractions.
 - Treat repeated failures as system design input.
 - Promote lessons into `AGENTS.md` and `CLAUDE.md` only when they should affect future work globally.
+- Review the Claude/Codex harness every 3-6 months and after major model releases.
 """
 
 
@@ -254,6 +295,8 @@ Describe the user-visible outcome.
 ## Context
 
 Relevant files, prior decisions, logs, screenshots, or constraints.
+
+Start Claude Code from the most specific subdirectory for this task when using Claude. Root context will still load through the parent walk, and local `CLAUDE.md` files should provide scoped commands.
 
 ## Definition Of Done
 
@@ -335,6 +378,205 @@ Use this after each meaningful task.
 - Did a previous compound note help?
 - Did we repeat an old failure?
 - What should be added to project memory?
+- Should a repeated instruction become a hook or path-scoped skill?
+- Should a root instruction move into a subdirectory `CLAUDE.md`?
+"""
+
+
+def codebase_map_template() -> str:
+    return """
+# Codebase Map
+
+Keep this file lightweight. One line per top-level area is enough. For large areas, create another `CODEBASE_MAP.md` or `CLAUDE.md` deeper in the tree.
+
+| Path | Purpose | Local Context |
+| --- | --- | --- |
+| `.agent-loop/` | Compound engineering templates and gates | `.agent-loop/harness-checklist.md` |
+| `.claude/` | Claude Code project commands, agents, settings, and optional skills | `.claude/settings.json` |
+| `docs/` | Durable decisions, patterns, failures, plans, reviews, and compound notes | `docs/compound/` |
+| `scripts/` | Project verification and automation entrypoints | `scripts/verify.ps1` |
+"""
+
+
+def harness_checklist_template() -> str:
+    return """
+# Large-Codebase Harness Checklist
+
+Use this checklist when setting up or reviewing the Claude/Codex harness.
+
+## Foundation
+
+- [ ] One DRI owns settings, permissions, marketplace/plugin updates, and `CLAUDE.md` conventions.
+- [ ] Root `CLAUDE.md` is short: big picture, navigation pointers, and critical gotchas.
+- [ ] Subdirectory `CLAUDE.md` files capture local build, test, lint, and naming conventions.
+- [ ] Developers start Claude Code in the subdirectory they are changing.
+- [ ] `CODEBASE_MAP.md` points to top-level areas and deeper local context.
+
+## Automation
+
+- [ ] `.claude/settings.json` denies generated, vendored, build, coverage, secret, and dependency paths.
+- [ ] Hooks handle automatic checks or improvement prompts instead of relying on memory.
+- [ ] Stop hook proposes `CLAUDE.md` or durable-memory updates when a session learns something reusable.
+- [ ] Verification entrypoint exists and is scoped enough to avoid full-suite overuse.
+
+## Skills And Plugins
+
+- [ ] Repeated task-specific expertise lives in skills, not root `CLAUDE.md`.
+- [ ] Skills are path-scoped by placing them in the relevant subtree when possible.
+- [ ] The baseline setup is packaged as a plugin so new engineers get it on day one.
+
+## Code Intelligence And Integrations
+
+- [ ] LSP is planned or installed for typed languages where grep is too noisy.
+- [ ] MCP servers are added only after the context layer, skills, hooks, and ownership are healthy.
+- [ ] Internal MCP integrations have an owner, auth model, and failure mode.
+
+## Maintenance
+
+- [ ] Harness review happens every 3-6 months and after major model releases.
+- [ ] Dead instructions and obsolete hooks are removed.
+- [ ] Repeated failures become docs, tests, hooks, or skills.
+"""
+
+
+def module_claude_template() -> str:
+    return """
+# Subdirectory CLAUDE.md Template
+
+Copy this into a service, package, or module as `CLAUDE.md`. Keep it local and specific.
+
+## Purpose
+
+What this module owns in one or two sentences.
+
+## Local Commands
+
+- Build:
+- Unit test:
+- Focused test:
+- Lint:
+- Typecheck:
+
+## Local Conventions
+
+- Naming:
+- Error handling:
+- Data/model boundaries:
+- Generated files:
+
+## Gotchas
+
+- Critical gotcha:
+
+## Local Skills
+
+If this module has specialized workflows, place path-scoped skills under:
+
+```text
+<this-module>/.claude/skills/<skill-name>/SKILL.md
+```
+"""
+
+
+def path_scoped_skill_template() -> str:
+    return """
+# Path-Scoped Skill Template
+
+Place this under the relevant subtree:
+
+```text
+services/payments/.claude/skills/payments-deploy/SKILL.md
+```
+
+Use a path-scoped skill when the expertise applies to one module or task type and would bloat root `CLAUDE.md`.
+
+```markdown
+---
+name: payments-deploy
+description: Use when deploying or reviewing deployment changes for the payments service.
+---
+
+# Payments Deploy
+
+## When To Use
+
+Use for payments deployment, rollback, and post-deploy validation.
+
+## Required Context
+
+- Local `CLAUDE.md`
+- Service runbook
+- Recent deployment notes
+
+## Workflow
+
+1. Check branch and diff scope.
+2. Run focused tests.
+3. Verify migration/backfill risk.
+4. Prepare deploy or rollback notes.
+5. Record any durable learning in `docs/`.
+```
+"""
+
+
+def lsp_mcp_roadmap_template() -> str:
+    return """
+# LSP And MCP Roadmap
+
+Add these after the context layer, hooks, and skills are healthy.
+
+## LSP Candidates
+
+| Language | Server | Install Owner | Status | Notes |
+| --- | --- | --- | --- | --- |
+| Python | pyright | TBD | Candidate | Useful when symbol names collide |
+| TypeScript | typescript-language-server | TBD | Candidate | Useful in monorepos |
+| Java/C#/C++ | language-specific server | TBD | Candidate | High value in typed enterprise repos |
+
+## MCP Candidates
+
+| Tool/Data Source | Why Claude Needs It | Owner | Auth Model | Status |
+| --- | --- | --- | --- | --- |
+| Internal docs | Avoid stale local knowledge | TBD | TBD | Backlog |
+| Ticketing system | Link work to source of truth | TBD | TBD | Backlog |
+| Analytics/logs | Debug with live operational context | TBD | TBD | Backlog |
+
+## Rule
+
+Do not add MCP servers just because they are available. Add them when repeated work is blocked by information Claude cannot reach through the repo, docs, or normal tools.
+"""
+
+
+def ownership_template() -> str:
+    return """
+# Harness Ownership
+
+## DRI
+
+- Name:
+- Backup:
+- Review cadence:
+- Last review:
+- Next review:
+
+## Scope
+
+The DRI owns:
+
+- `CLAUDE.md` conventions
+- `.claude/settings.json`
+- permissions policy
+- plugin marketplace and updates
+- path-scoped skill standards
+- hook safety and usefulness
+- LSP/MCP rollout decisions
+
+## Review Triggers
+
+- Every 3-6 months
+- After major model releases
+- When developer feedback plateaus
+- After repeated failures or recurring review comments
 """
 
 
@@ -470,8 +712,14 @@ try {
         ".agent-loop/task-brief-template.md",
         ".agent-loop/review-rubric.md",
         ".agent-loop/eval-scorecard.md",
+        ".agent-loop/harness-checklist.md",
+        ".agent-loop/module-claude-template.md",
+        ".agent-loop/path-scoped-skill-template.md",
+        ".agent-loop/lsp-mcp-roadmap.md",
+        ".agent-loop/harness-ownership.md",
         ".agent-loop/team-topology.md",
         ".agent-loop/codex-parallel-contract.md",
+        "CODEBASE_MAP.md",
         ".claude/settings.json",
         ".claude/commands/compound-init.md",
         ".claude/commands/compound-team-start.md"
@@ -486,6 +734,9 @@ try {
     $settings = Get-Content -Raw ".claude/settings.json" | ConvertFrom-Json
     if (-not $settings.env -or $settings.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS -ne "1") {
         throw "Missing Claude agent-team flag in .claude/settings.json"
+    }
+    if (-not $settings.permissions -or -not $settings.permissions.deny -or $settings.permissions.deny.Count -eq 0) {
+        throw "Missing permissions.deny entries in .claude/settings.json"
     }
 
     if ($CompoundOnly) {
@@ -528,6 +779,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/compound_orchestrator.py" check --target 
 ```
 
 Confirm that `.claude/settings.json` enables Claude Code agent teams with `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, and use `.agent-loop/codex-parallel-contract.md` for the matching Codex parallel-agent workflow.
+Also review `.agent-loop/harness-checklist.md` and `CODEBASE_MAP.md` so the codebase is navigable before adding MCP or LSP complexity.
 """,
         ".claude/commands/compound-start.md": """
 # Compound Start
@@ -606,6 +858,19 @@ Only add an implementer teammate if the write scope is disjoint and clear.
 Keep the team to 3-5 teammates, wait for them to finish, synthesize findings, run verification, and write a compound note.
 ```
 """,
+        ".claude/commands/compound-harness-check.md": """
+# Compound Harness Check
+
+Audit this repository's large-codebase Claude/Codex harness.
+
+Run:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/compound_orchestrator.py" harness-check --target .
+```
+
+Summarize missing setup in priority order: navigation, layered `CLAUDE.md`, permissions deny rules, hooks, path-scoped skills, LSP/MCP roadmap, ownership, and review cadence.
+""",
     }
 
 
@@ -650,11 +915,17 @@ def init_project(root: Path, *, force: bool = False) -> WriteReport:
     report.extend(merge_claude_settings(root))
 
     for relative, content in {
+        "CODEBASE_MAP.md": codebase_map_template(),
         "STRATEGY.md": strategy_template(),
         ".agent-loop/task-brief-template.md": task_brief_template(),
         ".agent-loop/handoff-template.md": handoff_template(),
         ".agent-loop/review-rubric.md": review_rubric_template(),
         ".agent-loop/eval-scorecard.md": scorecard_template(),
+        ".agent-loop/harness-checklist.md": harness_checklist_template(),
+        ".agent-loop/module-claude-template.md": module_claude_template(),
+        ".agent-loop/path-scoped-skill-template.md": path_scoped_skill_template(),
+        ".agent-loop/lsp-mcp-roadmap.md": lsp_mcp_roadmap_template(),
+        ".agent-loop/harness-ownership.md": ownership_template(),
         ".agent-loop/team-topology.md": team_topology_template(),
         ".agent-loop/codex-parallel-contract.md": codex_parallel_contract_template(),
         "scripts/verify.ps1": verify_script_template(),
@@ -832,11 +1103,17 @@ def check_project(root: Path, task_id: Optional[str] = None) -> Tuple[bool, List
     required_files = [
         "AGENTS.md",
         "CLAUDE.md",
+        "CODEBASE_MAP.md",
         "STRATEGY.md",
         ".agent-loop/task-brief-template.md",
         ".agent-loop/handoff-template.md",
         ".agent-loop/review-rubric.md",
         ".agent-loop/eval-scorecard.md",
+        ".agent-loop/harness-checklist.md",
+        ".agent-loop/module-claude-template.md",
+        ".agent-loop/path-scoped-skill-template.md",
+        ".agent-loop/lsp-mcp-roadmap.md",
+        ".agent-loop/harness-ownership.md",
         ".agent-loop/team-topology.md",
         ".agent-loop/codex-parallel-contract.md",
         ".claude/settings.json",
@@ -847,6 +1124,7 @@ def check_project(root: Path, task_id: Optional[str] = None) -> Tuple[bool, List
         ".claude/commands/compound-learn.md",
         ".claude/commands/compound-init.md",
         ".claude/commands/compound-team-start.md",
+        ".claude/commands/compound-harness-check.md",
         ".claude/agents/compound-architect.md",
         ".claude/agents/compound-reviewer.md",
         ".claude/agents/compound-test-runner.md",
@@ -872,6 +1150,14 @@ def check_project(root: Path, task_id: Optional[str] = None) -> Tuple[bool, List
             env = settings_data.get("env")
             if not isinstance(env, dict) or env.get(CLAUDE_AGENT_TEAM_ENV) != "1":
                 failures.append(f"Missing Claude agent team env flag: env.{CLAUDE_AGENT_TEAM_ENV} = \"1\"")
+            permissions = settings_data.get("permissions")
+            deny = permissions.get("deny") if isinstance(permissions, dict) else None
+            if not isinstance(deny, list):
+                failures.append("Missing permissions.deny list in .claude/settings.json")
+            else:
+                missing_denies = [item for item in DEFAULT_PERMISSION_DENY if item not in deny]
+                if missing_denies:
+                    failures.append(f"Missing default permissions.deny entries: {', '.join(missing_denies)}")
 
     if task_id:
         task_files = [
@@ -884,6 +1170,76 @@ def check_project(root: Path, task_id: Optional[str] = None) -> Tuple[bool, List
                 failures.append(f"Task gate missing file: {item}")
 
     return not failures, failures
+
+
+def harness_audit(root: Path) -> Tuple[bool, List[str], List[str]]:
+    root = root.resolve()
+    warnings: List[str] = []
+    failures: List[str] = []
+
+    ok, structural_failures = check_project(root)
+    failures.extend(structural_failures)
+
+    claude = root / "CLAUDE.md"
+    if claude.exists():
+        line_count = len(claude.read_text(encoding="utf-8").splitlines())
+        if line_count > 160:
+            warnings.append(f"Root CLAUDE.md is {line_count} lines; keep root context lean and move local details deeper.")
+    else:
+        failures.append("Missing root CLAUDE.md")
+
+    subdirectory_claudes = [
+        path
+        for path in root.rglob("CLAUDE.md")
+        if path != claude and ".git" not in path.parts and "node_modules" not in path.parts
+    ]
+    if not subdirectory_claudes:
+        warnings.append("No subdirectory CLAUDE.md files found; add them for services/modules with local commands.")
+
+    skill_dirs = list((root / ".claude/skills").glob("*/SKILL.md")) if (root / ".claude/skills").exists() else []
+    nested_skill_dirs = [
+        path
+        for path in root.rglob(".claude/skills/*/SKILL.md")
+        if ".git" not in path.parts and path not in skill_dirs
+    ]
+    if not skill_dirs and not nested_skill_dirs:
+        warnings.append("No project or path-scoped skills found yet; promote repeated task-specific expertise into skills.")
+
+    ownership = root / ".agent-loop/harness-ownership.md"
+    if ownership.exists():
+        text = ownership.read_text(encoding="utf-8")
+        if "- Name:" in text and "- Next review:" in text:
+            warnings.append("Harness ownership template still needs a named DRI and review cadence.")
+
+    return not failures, failures, warnings
+
+
+def hook_context(stdin_text: str) -> str:
+    try:
+        payload = json.loads(stdin_text) if stdin_text.strip() else {}
+    except json.JSONDecodeError:
+        payload = {}
+    cwd = Path(payload.get("cwd") or ".").resolve()
+    root = cwd
+    for candidate in [cwd, *cwd.parents]:
+        if (candidate / ".agent-loop").exists() or (candidate / ".git").exists():
+            root = candidate
+            break
+
+    reminders = [
+        "Compound Orchestrator harness reminder:",
+        "- Start Claude Code in the most specific subdirectory for the work; parent CLAUDE.md files still load.",
+        "- Keep root CLAUDE.md lean; put local commands and conventions in subdirectory CLAUDE.md files.",
+        "- Use hooks for automatic behavior and path-scoped skills for specialized expertise.",
+        "- Add MCP/LSP only after navigation, permissions, hooks, and ownership are healthy.",
+    ]
+    if (root / "CODEBASE_MAP.md").exists():
+        reminders.append("- Navigation map available: CODEBASE_MAP.md")
+    if (root / ".agent-loop/harness-checklist.md").exists():
+        reminders.append("- Harness checklist available: .agent-loop/harness-checklist.md")
+    if (root / ".agent-loop/lsp-mcp-roadmap.md").exists():
+        reminders.append("- LSP/MCP roadmap available: .agent-loop/lsp-mcp-roadmap.md")
+    return "\n".join(reminders)
 
 
 def self_test(plugin_root: Path) -> Tuple[bool, List[str]]:
@@ -926,11 +1282,15 @@ def self_test(plugin_root: Path) -> Tuple[bool, List[str]]:
         for default_dir in ["commands", "agents", "skills"]:
             if not (plugin_root / default_dir).is_dir():
                 failures.append(f"Claude default component path does not exist: {default_dir}")
+        hooks_path = claude_data.get("hooks")
+        if hooks_path and not (plugin_root / str(hooks_path).replace("./", "")).exists():
+            failures.append(f"Claude hooks path does not exist: {hooks_path}")
 
     for required in [
         "README.md",
         "LICENSE",
         "skills/compound-orchestrator/SKILL.md",
+        "hooks/hooks.json",
         "scripts/verify_plugin.ps1",
         "scripts/verify_plugin.sh",
         "commands/compound-init.md",
@@ -939,6 +1299,7 @@ def self_test(plugin_root: Path) -> Tuple[bool, List[str]]:
         "commands/compound-review.md",
         "commands/compound-learn.md",
         "commands/compound-team-start.md",
+        "commands/compound-harness-check.md",
         "agents/compound-architect.agent.md",
         "agents/compound-reviewer.agent.md",
         "agents/compound-test-runner.agent.md",
@@ -953,6 +1314,9 @@ def self_test(plugin_root: Path) -> Tuple[bool, List[str]]:
         ok, check_failures = check_project(target)
         if not ok:
             failures.extend(f"bootstrap check: {item}" for item in check_failures)
+        audit_ok, audit_failures, _audit_warnings = harness_audit(target)
+        if not audit_ok:
+            failures.extend(f"harness audit: {item}" for item in audit_failures)
         team_task_id, _ = start_team(
             target,
             "Exercise team orchestration",
@@ -1016,6 +1380,12 @@ def build_parser() -> argparse.ArgumentParser:
     check_p.add_argument("--task-id", help="Require plan, review, and compound files for this task id.")
     check_p.add_argument("--json", action="store_true", help="Print JSON report.")
 
+    audit_p = sub.add_parser("harness-check", help="Audit large-codebase Claude/Codex harness readiness.")
+    audit_p.add_argument("--target", default=".", help="Project root to audit.")
+    audit_p.add_argument("--json", action="store_true", help="Print JSON report.")
+
+    hook_p = sub.add_parser("hook-context", help="Emit concise SessionStart context for Claude Code hooks.")
+
     start_p = sub.add_parser("start", help="Create brainstorm and plan artifacts for a task.")
     start_p.add_argument("--target", default=".", help="Project root.")
     start_p.add_argument("--title", required=True, help="Task title.")
@@ -1070,6 +1440,24 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             for failure in failures:
                 print(f"  - {failure}")
         return 0 if ok else 1
+
+    if args.command == "harness-check":
+        ok, failures, warnings = harness_audit(Path(args.target))
+        if args.json:
+            print(json.dumps({"ok": ok, "failures": failures, "warnings": warnings}, indent=2, sort_keys=True))
+        else:
+            print("harness audit: PASS" if ok else "harness audit: FAIL")
+            for failure in failures:
+                print(f"  - {failure}")
+            if warnings:
+                print("warnings:")
+                for warning in warnings:
+                    print(f"  - {warning}")
+        return 0 if ok else 1
+
+    if args.command == "hook-context":
+        print(hook_context(sys.stdin.read()))
+        return 0
 
     if args.command == "start":
         task_id, report = start_task(Path(args.target), args.title, force=args.force)

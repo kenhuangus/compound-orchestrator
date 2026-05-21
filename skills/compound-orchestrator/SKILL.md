@@ -34,9 +34,14 @@ Bootstrap also enables Claude Code agent teams for the project by merging this i
 {
   "env": {
     "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  },
+  "permissions": {
+    "deny": ["Read(./.env)", "Read(./node_modules/**)", "Read(./dist/**)"]
   }
 }
 ```
+
+It also installs large-codebase harness templates: `CODEBASE_MAP.md`, `.agent-loop/harness-checklist.md`, `.agent-loop/module-claude-template.md`, `.agent-loop/path-scoped-skill-template.md`, `.agent-loop/lsp-mcp-roadmap.md`, and `.agent-loop/harness-ownership.md`.
 
 ## During Work
 
@@ -64,6 +69,12 @@ Bootstrap also enables Claude Code agent teams for the project by merging this i
 & <python> <plugin-root>\scripts\compound_orchestrator.py check --target <project-root> --task-id <task-id>
 ```
 
+7. Audit the harness when onboarding a repo or after major workflow changes:
+
+```powershell
+& <python> <plugin-root>\scripts\compound_orchestrator.py harness-check --target <project-root>
+```
+
 ## Parallel Agent Policy
 
 Use parallel agents for independent research, planning, test strategy, review, and competing bug hypotheses. Give every agent a role, scope, owned files, output artifact, and verification responsibility.
@@ -84,6 +95,16 @@ Or for Codex:
 
 Claude Code should create an agent team only when teammate-to-teammate coordination is useful. Codex should mirror the same topology with a lead-integrator hub plus explorer, worker, test-runner, and reviewer agents, each with disjoint scopes.
 
+## Large-Codebase Harness Policy
+
+- Root `CLAUDE.md` and `AGENTS.md` should be lean: big picture, pointers, and critical gotchas.
+- Put local build, test, lint, and domain conventions in subdirectory `CLAUDE.md` files.
+- Start Claude Code in the subdirectory being changed; parent context still loads.
+- Generated, vendored, build, coverage, dependency, sourcemap, and secret paths should be denied in `.claude/settings.json`.
+- Repeated instructions should become hooks when automatic or path-scoped skills when task-specific.
+- Add LSP for typed/noisy symbol-heavy codebases before relying on broad grep.
+- Add MCP only after the context layer, skills, hooks, and ownership are healthy.
+
 ## Claude Code Integration
 
 The initializer writes `.claude/commands` and `.claude/agents` templates. These are intentionally plain Markdown so a project can keep them under version control and adapt them.
@@ -100,5 +121,8 @@ Prefer durable notes over chat-only conclusions:
 - `.agent-loop/eval-scorecard.md`
 - `.agent-loop/team-topology.md`
 - `.agent-loop/codex-parallel-contract.md`
+- `.agent-loop/harness-checklist.md`
+- `.agent-loop/lsp-mcp-roadmap.md`
+- `.agent-loop/harness-ownership.md`
 
 If a lesson should affect all future work, update the managed compound block in `AGENTS.md` and `CLAUDE.md`.

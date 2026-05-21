@@ -16,5 +16,6 @@
     "codex",
     "agent-teams",
     "workflow"
-  ]
+  ],
+  "hooks": "./hooks/hooks.json"
 }

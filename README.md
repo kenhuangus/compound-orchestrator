@@ -8,6 +8,8 @@ It complements the EveryInc Compound Engineering plugin by adding project-level 
 - Claude slash-command and subagent templates
 - Claude Code agent-team enablement
 - a Codex parallel-agent contract that mirrors the same team topology
+- large-codebase harness templates for layered `CLAUDE.md`, navigation, ownership, LSP/MCP rollout, and path-scoped skills
+- Claude Code hooks for session-start context reminders and stop-time durable-learning prompts
 - task brief, review, handoff, and scorecard templates
 - a verification adapter
 - a completion gate that checks for plan, review, and compound artifacts
@@ -38,9 +40,18 @@ It also merges the Claude Code agent-team flag into `.claude/settings.json`:
 {
   "env": {
     "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  },
+  "permissions": {
+    "deny": [
+      "Read(./.env)",
+      "Read(./node_modules/**)",
+      "Read(./dist/**)"
+    ]
   }
 }
 ```
+
+The generated deny list also covers common build, coverage, generated, vendor, sourcemap, and minified JavaScript paths.
 
 ## Daily Use
 
@@ -60,6 +71,12 @@ Check completion gates:
 
 ```powershell
 & $py .\scripts\compound_orchestrator.py check --target . --task-id 2026-05-21-add-billing-webhook-retry-handling
+```
+
+Audit the harness:
+
+```powershell
+& $py .\scripts\compound_orchestrator.py harness-check --target .
 ```
 
 Start a coordinated team run:
@@ -91,17 +108,22 @@ claude plugin validate .
 - `/compound-learn`
 - `/compound-init`
 - `/compound-team-start`
+- `/compound-harness-check`
 - `compound-architect`
 - `compound-reviewer`
 - `compound-test-runner`
 
 Claude Code agent teams are experimental and disabled by default, so `init` writes the required project setting. The runtime team config is still created and managed by Claude Code under `~/.claude/teams/`; this plugin only enables the feature and supplies reusable teammate roles plus the shared topology in `.agent-loop/team-topology.md`.
 
+The plugin also ships hooks in `hooks/hooks.json`. `SessionStart` injects a short harness reminder, and `Stop` asks whether the session learned anything durable that should be captured in `CLAUDE.md` or durable docs before ending.
+
 ## Codex
 
 The Codex skill in `skills/compound-orchestrator/SKILL.md` teaches Codex to use the same loop and the same artifacts. Codex remains responsible for respecting local workspace safety, test execution, and agent-spawn rules.
 
 For Codex multi-agent work, use `.agent-loop/codex-parallel-contract.md`. Codex does not share Claude's runtime team mailbox, so the lead Codex session acts as the hub: it spawns bounded explorer/worker/reviewer agents, prevents same-file ownership conflicts, integrates results, verifies, and writes the compound note.
+
+The generated `AGENTS.md`, `CODEBASE_MAP.md`, and `.agent-loop/harness-checklist.md` bring the same large-codebase harness rules to Codex: keep root context lean, layer local conventions deeper, deny noisy generated paths, and promote repeated instructions into skills or hooks.
 
 ## Test
 

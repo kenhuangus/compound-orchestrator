@@ -25,12 +25,21 @@ class CompoundOrchestratorTests(unittest.TestCase):
             self.assertTrue((root / ".claude/commands/compound-init.md").is_file())
             self.assertTrue((root / ".claude/commands/compound-start.md").is_file())
             self.assertTrue((root / ".claude/commands/compound-team-start.md").is_file())
+            self.assertTrue((root / ".claude/commands/compound-harness-check.md").is_file())
             self.assertTrue((root / ".claude/agents/compound-reviewer.md").is_file())
+            self.assertTrue((root / "CODEBASE_MAP.md").is_file())
+            self.assertTrue((root / ".agent-loop/harness-checklist.md").is_file())
+            self.assertTrue((root / ".agent-loop/module-claude-template.md").is_file())
+            self.assertTrue((root / ".agent-loop/path-scoped-skill-template.md").is_file())
+            self.assertTrue((root / ".agent-loop/lsp-mcp-roadmap.md").is_file())
+            self.assertTrue((root / ".agent-loop/harness-ownership.md").is_file())
             self.assertTrue((root / ".agent-loop/team-topology.md").is_file())
             self.assertTrue((root / ".agent-loop/codex-parallel-contract.md").is_file())
             self.assertTrue((root / "scripts/verify.ps1").is_file())
             settings = json.loads((root / ".claude/settings.json").read_text(encoding="utf-8"))
             self.assertEqual(settings["env"][co.CLAUDE_AGENT_TEAM_ENV], "1")
+            for deny_rule in co.DEFAULT_PERMISSION_DENY:
+                self.assertIn(deny_rule, settings["permissions"]["deny"])
             self.assertIn(co.MANAGED_START, (root / "AGENTS.md").read_text(encoding="utf-8"))
             self.assertIn(co.MANAGED_START, (root / "CLAUDE.md").read_text(encoding="utf-8"))
 
@@ -62,6 +71,7 @@ class CompoundOrchestratorTests(unittest.TestCase):
                         },
                         "permissions": {
                             "allow": ["Bash(npm test)"],
+                            "deny": ["Read(./private/**)"],
                         },
                     }
                 ),
@@ -74,6 +84,8 @@ class CompoundOrchestratorTests(unittest.TestCase):
             self.assertEqual(settings["env"]["EXISTING_FLAG"], "kept")
             self.assertEqual(settings["env"][co.CLAUDE_AGENT_TEAM_ENV], "1")
             self.assertEqual(settings["permissions"]["allow"], ["Bash(npm test)"])
+            self.assertIn("Read(./private/**)", settings["permissions"]["deny"])
+            self.assertIn("Read(./node_modules/**)", settings["permissions"]["deny"])
 
     def test_check_fails_before_init_and_passes_after_init(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -142,6 +154,29 @@ class CompoundOrchestratorTests(unittest.TestCase):
             self.assertIn("Mode: `codex-parallel-agents`", text)
             self.assertIn(".agent-loop/team-topology.md", text)
 
+    def test_harness_audit_passes_with_warnings_for_template_fields(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            co.init_project(root)
+
+            ok, failures, warnings = co.harness_audit(root)
+
+            self.assertTrue(ok, failures)
+            self.assertEqual(failures, [])
+            self.assertTrue(any("DRI" in warning for warning in warnings))
+
+    def test_hook_context_mentions_navigation_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            co.init_project(root)
+            payload = json.dumps({"cwd": str(root), "hook_event_name": "SessionStart"})
+
+            text = co.hook_context(payload)
+
+            self.assertIn("Compound Orchestrator harness reminder", text)
+            self.assertIn("CODEBASE_MAP.md", text)
+            self.assertIn(".agent-loop/harness-checklist.md", text)
+
     def test_learn_writes_slugged_pattern_note(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -176,7 +211,9 @@ class CompoundOrchestratorTests(unittest.TestCase):
         self.assertTrue((ROOT / "commands").is_dir())
         self.assertTrue((ROOT / "agents").is_dir())
         self.assertTrue((ROOT / "skills").is_dir())
+        self.assertTrue((ROOT / "hooks/hooks.json").is_file())
         self.assertTrue((ROOT / "commands/compound-team-start.md").is_file())
+        self.assertTrue((ROOT / "commands/compound-harness-check.md").is_file())
 
     def test_self_test_passes(self):
         ok, failures = co.self_test(ROOT)
