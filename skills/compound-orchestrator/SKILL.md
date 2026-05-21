@@ -43,6 +43,12 @@ Bootstrap also enables Claude Code agent teams for the project by merging this i
 
 It also installs large-codebase harness templates: `CODEBASE_MAP.md`, `.agent-loop/harness-checklist.md`, `.agent-loop/module-claude-template.md`, `.agent-loop/path-scoped-skill-template.md`, `.agent-loop/lsp-mcp-roadmap.md`, and `.agent-loop/harness-ownership.md`.
 
+It also installs cross-tool coordination files:
+
+- `.agent-loop/coordination/ownership.json`
+- `.agent-loop/cross-tool-protocol.md`
+- `docs/cross-reviews/`
+
 ## During Work
 
 1. Start a task with a stable id:
@@ -75,6 +81,20 @@ It also installs large-codebase harness templates: `CODEBASE_MAP.md`, `.agent-lo
 & <python> <plugin-root>\scripts\compound_orchestrator.py harness-check --target <project-root>
 ```
 
+8. Claim intended files before editing in mixed Claude/Codex work:
+
+```powershell
+& <python> <plugin-root>\scripts\compound_orchestrator.py claim --target <project-root> --tool codex --agent codex-worker --task-id <task-id> --paths src/file.py --intent "<planned edit>"
+```
+
+If the claim fails, stop instead of editing. Ask the lead integrator to narrow scope, release stale claims, or serialize the work.
+
+9. Record opposite-tool review:
+
+```powershell
+& <python> <plugin-root>\scripts\compound_orchestrator.py cross-review --target <project-root> --task-id <task-id> --reviewer-tool codex --author-tool claude --summary "<findings summary>"
+```
+
 ## Parallel Agent Policy
 
 Use parallel agents for independent research, planning, test strategy, review, and competing bug hypotheses. Give every agent a role, scope, owned files, output artifact, and verification responsibility.
@@ -94,6 +114,8 @@ Or for Codex:
 ```
 
 Claude Code should create an agent team only when teammate-to-teammate coordination is useful. Codex should mirror the same topology with a lead-integrator hub plus explorer, worker, test-runner, and reviewer agents, each with disjoint scopes.
+
+Claude Code should use `compound-cross-tool-reviewer` to review Codex-authored changes. Codex should use `codex-cross-tool-reviewer` to review Claude Code-authored changes.
 
 ## Large-Codebase Harness Policy
 
@@ -121,6 +143,7 @@ Prefer durable notes over chat-only conclusions:
 - `.agent-loop/eval-scorecard.md`
 - `.agent-loop/team-topology.md`
 - `.agent-loop/codex-parallel-contract.md`
+- `.agent-loop/cross-tool-protocol.md`
 - `.agent-loop/harness-checklist.md`
 - `.agent-loop/lsp-mcp-roadmap.md`
 - `.agent-loop/harness-ownership.md`

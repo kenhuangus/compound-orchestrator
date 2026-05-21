@@ -10,6 +10,8 @@ It complements the EveryInc Compound Engineering plugin by adding project-level 
 - a Codex parallel-agent contract that mirrors the same team topology
 - large-codebase harness templates for layered `CLAUDE.md`, navigation, ownership, LSP/MCP rollout, and path-scoped skills
 - Claude Code hooks for session-start context reminders and stop-time durable-learning prompts
+- cross-tool ownership claims so Claude Code and Codex do not edit overlapping files at the same time
+- Claude and Codex cross-review roles so each tool can review code authored by the other
 - task brief, review, handoff, and scorecard templates
 - a verification adapter
 - a completion gate that checks for plan, review, and compound artifacts
@@ -79,6 +81,24 @@ Audit the harness:
 & $py .\scripts\compound_orchestrator.py harness-check --target .
 ```
 
+Claim files before editing:
+
+```powershell
+& $py .\scripts\compound_orchestrator.py claim --target . --tool codex --agent codex-worker --task-id 2026-05-21-task --paths src/payment.py --intent "Implement retry handling"
+```
+
+If Claude Code or another Codex agent already owns an overlapping path, the claim fails and the agent must not edit. Release claims after integration or handoff:
+
+```powershell
+& $py .\scripts\compound_orchestrator.py release --target . --tool codex --agent codex-worker --task-id 2026-05-21-task
+```
+
+Record opposite-tool review:
+
+```powershell
+& $py .\scripts\compound_orchestrator.py cross-review --target . --task-id 2026-05-21-task --reviewer-tool claude --author-tool codex --summary "Claude reviewed Codex-authored retry handling."
+```
+
 Start a coordinated team run:
 
 ```powershell
@@ -109,9 +129,14 @@ claude plugin validate .
 - `/compound-init`
 - `/compound-team-start`
 - `/compound-harness-check`
+- `/compound-claim`
+- `/compound-release`
+- `/compound-ownership-status`
+- `/compound-cross-review`
 - `compound-architect`
 - `compound-reviewer`
 - `compound-test-runner`
+- `compound-cross-tool-reviewer`
 
 Claude Code agent teams are experimental and disabled by default, so `init` writes the required project setting. The runtime team config is still created and managed by Claude Code under `~/.claude/teams/`; this plugin only enables the feature and supplies reusable teammate roles plus the shared topology in `.agent-loop/team-topology.md`.
 
@@ -124,6 +149,8 @@ The Codex skill in `skills/compound-orchestrator/SKILL.md` teaches Codex to use 
 For Codex multi-agent work, use `.agent-loop/codex-parallel-contract.md`. Codex does not share Claude's runtime team mailbox, so the lead Codex session acts as the hub: it spawns bounded explorer/worker/reviewer agents, prevents same-file ownership conflicts, integrates results, verifies, and writes the compound note.
 
 The generated `AGENTS.md`, `CODEBASE_MAP.md`, and `.agent-loop/harness-checklist.md` bring the same large-codebase harness rules to Codex: keep root context lean, layer local conventions deeper, deny noisy generated paths, and promote repeated instructions into skills or hooks.
+
+Codex also gets a `codex-cross-tool-reviewer` skill. Use it when Codex reviews Claude Code-authored changes before integration.
 
 ## Test
 

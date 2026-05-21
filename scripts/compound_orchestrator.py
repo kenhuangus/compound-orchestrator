@@ -19,6 +19,7 @@ MANAGED_END = "<!-- compound-orchestrator:end -->"
 
 REQUIRED_DIRS = [
     ".agent-loop",
+    ".agent-loop/coordination",
     ".claude/commands",
     ".claude/agents",
     "docs/brainstorms",
@@ -27,6 +28,7 @@ REQUIRED_DIRS = [
     "docs/decisions",
     "docs/failures",
     "docs/reviews",
+    "docs/cross-reviews",
     "docs/compound",
     "docs/pulse-reports",
     "scripts",
@@ -56,9 +58,13 @@ KIND_TO_DIR = {
     "decision": "docs/decisions",
     "failure": "docs/failures",
     "review": "docs/reviews",
+    "cross-review": "docs/cross-reviews",
     "compound": "docs/compound",
     "pulse": "docs/pulse-reports",
 }
+
+OWNERSHIP_FILE = ".agent-loop/coordination/ownership.json"
+TOOL_CHOICES = ["claude", "codex"]
 
 
 @dataclass
@@ -80,6 +86,12 @@ class WriteReport:
         }
 
 
+class OwnershipConflict(Exception):
+    def __init__(self, conflicts: List[Dict[str, str]]) -> None:
+        self.conflicts = conflicts
+        super().__init__("ownership conflict")
+
+
 def slugify(value: str, *, max_len: int = 72) -> str:
     value = value.strip().lower()
     value = re.sub(r"[^a-z0-9]+", "-", value)
@@ -96,6 +108,31 @@ def task_id_for(title: str, today: Optional[_dt.date] = None) -> str:
 
 def rel(path: Path, root: Path) -> str:
     return path.relative_to(root).as_posix()
+
+
+def now_iso() -> str:
+    return _dt.datetime.now(_dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def normalize_scope_path(value: str) -> str:
+    value = value.strip().replace("\\", "/")
+    value = re.sub(r"/+", "/", value)
+    if value.startswith("./"):
+        value = value[2:]
+    value = value.strip("/")
+    return value or "."
+
+
+def paths_overlap(left: str, right: str) -> bool:
+    left = normalize_scope_path(left)
+    right = normalize_scope_path(right)
+    if left == "." or right == ".":
+        return True
+    if "*" in left or "?" in left or "[" in left:
+        return left == right or right.startswith(left.split("*", 1)[0].rstrip("/") + "/")
+    if "*" in right or "?" in right or "[" in right:
+        return left == right or left.startswith(right.split("*", 1)[0].rstrip("/") + "/")
+    return left == right or left.startswith(right + "/") or right.startswith(left + "/")
 
 
 def ensure_dirs(root: Path) -> WriteReport:
@@ -147,6 +184,162 @@ def write_json_file(root: Path, relative: str, data: Dict[str, object]) -> Write
     path.write_text(serialized, encoding="utf-8", newline="\n")
     report.created.append(relative)
     return report
+
+
+def load_ownership(root: Path) -> Dict[str, object]:
+    path = root / OWNERSHIP_FILE
+    if not path.exists():
+        return {"schema_version": 1, "claims": []}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{OWNERSHIP_FILE} is not valid JSON: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ValueError(f"{OWNERSHIP_FILE} must contain a JSON object")
+    claims = data.get("claims")
+    if claims is None:
+        data["claims"] = []
+    elif not isinstance(claims, list):
+        raise ValueError(f"{OWNERSHIP_FILE}.claims must be a JSON array")
+    data.setdefault("schema_version", 1)
+    return data
+
+
+def save_ownership(root: Path, data: Dict[str, object]) -> WriteReport:
+    return write_json_file(root, OWNERSHIP_FILE, data)
+
+
+def claim_scope(
+    root: Path,
+    *,
+    tool: str,
+    agent: str,
+    task_id: str,
+    paths: List[str],
+    intent: str = "",
+    force: bool = False,
+) -> WriteReport:
+    if tool not in TOOL_CHOICES:
+        raise ValueError(f"tool must be one of: {', '.join(TOOL_CHOICES)}")
+    if not paths:
+        raise ValueError("at least one path must be claimed")
+    root = root.resolve()
+    ensure_dirs(root)
+    data = load_ownership(root)
+    claims = data["claims"]
+    normalized_paths = [normalize_scope_path(item) for item in paths]
+
+    conflicts: List[Dict[str, str]] = []
+    for requested in normalized_paths:
+        for claim in claims:
+            if not isinstance(claim, dict) or claim.get("status") != "active":
+                continue
+            same_claimant = claim.get("tool") == tool and claim.get("agent") == agent and claim.get("task_id") == task_id
+            if same_claimant:
+                continue
+            existing_path = str(claim.get("path", ""))
+            if paths_overlap(existing_path, requested):
+                conflicts.append(
+                    {
+                        "requested_path": requested,
+                        "existing_path": existing_path,
+                        "existing_tool": str(claim.get("tool", "")),
+                        "existing_agent": str(claim.get("agent", "")),
+                        "existing_task_id": str(claim.get("task_id", "")),
+                    }
+                )
+    if conflicts and not force:
+        raise OwnershipConflict(conflicts)
+
+    existing_keys = {
+        (
+            claim.get("tool"),
+            claim.get("agent"),
+            claim.get("task_id"),
+            claim.get("path"),
+            claim.get("status"),
+        )
+        for claim in claims
+        if isinstance(claim, dict)
+    }
+    timestamp = now_iso()
+    for path_value in normalized_paths:
+        key = (tool, agent, task_id, path_value, "active")
+        if key in existing_keys:
+            continue
+        claims.append(
+            {
+                "tool": tool,
+                "agent": agent,
+                "task_id": task_id,
+                "path": path_value,
+                "intent": intent,
+                "status": "active",
+                "claimed_at": timestamp,
+            }
+        )
+    return save_ownership(root, data)
+
+
+def release_scope(
+    root: Path,
+    *,
+    tool: Optional[str] = None,
+    agent: Optional[str] = None,
+    task_id: Optional[str] = None,
+    paths: Optional[List[str]] = None,
+) -> Tuple[int, WriteReport]:
+    root = root.resolve()
+    data = load_ownership(root)
+    normalized_paths = [normalize_scope_path(item) for item in (paths or [])]
+    released = 0
+    timestamp = now_iso()
+    for claim in data.get("claims", []):
+        if not isinstance(claim, dict) or claim.get("status") != "active":
+            continue
+        if tool and claim.get("tool") != tool:
+            continue
+        if agent and claim.get("agent") != agent:
+            continue
+        if task_id and claim.get("task_id") != task_id:
+            continue
+        if normalized_paths and normalize_scope_path(str(claim.get("path", ""))) not in normalized_paths:
+            continue
+        claim["status"] = "released"
+        claim["released_at"] = timestamp
+        released += 1
+    return released, save_ownership(root, data)
+
+
+def active_claims(root: Path) -> List[Dict[str, object]]:
+    data = load_ownership(root.resolve())
+    return [claim for claim in data.get("claims", []) if isinstance(claim, dict) and claim.get("status") == "active"]
+
+
+def active_ownership_conflicts(root: Path) -> List[Dict[str, str]]:
+    claims = active_claims(root)
+    conflicts: List[Dict[str, str]] = []
+    for index, left in enumerate(claims):
+        for right in claims[index + 1 :]:
+            same_claimant = (
+                left.get("tool") == right.get("tool")
+                and left.get("agent") == right.get("agent")
+                and left.get("task_id") == right.get("task_id")
+            )
+            if same_claimant:
+                continue
+            if paths_overlap(str(left.get("path", "")), str(right.get("path", ""))):
+                conflicts.append(
+                    {
+                        "left_path": str(left.get("path", "")),
+                        "left_tool": str(left.get("tool", "")),
+                        "left_agent": str(left.get("agent", "")),
+                        "right_path": str(right.get("path", "")),
+                        "right_tool": str(right.get("tool", "")),
+                        "right_agent": str(right.get("agent", "")),
+                    }
+                )
+    return conflicts
 
 
 def merge_claude_settings(root: Path) -> WriteReport:
@@ -235,6 +428,9 @@ Use this repository as a compound engineering system:
 Completion gate:
 
 - A plan exists for the task.
+- Any files edited by Claude Code or Codex are claimed in `.agent-loop/coordination/ownership.json` before edits.
+- No active ownership claim overlaps another agent's claim unless the lead explicitly resolves the conflict.
+- A cross-tool review exists when Claude Code reviews Codex-authored changes or Codex reviews Claude-authored changes.
 - Verification was run or the blocker is documented.
 - Review findings are resolved or explicitly accepted.
 - A compound note records what future work should reuse or avoid.
@@ -247,6 +443,9 @@ Parallel agent policy:
 - Avoid parallel edits to the same file unless a lead integrator owns the final merge.
 - Claude Code should use agent teams when work benefits from teammate-to-teammate coordination.
 - Codex should mirror the same team shape with a lead-integrator hub plus explorer/worker/reviewer agents; workers must have disjoint write scopes.
+- Before editing, claim intended files with `compound_orchestrator.py claim`.
+- Before handing off, release claims with `compound_orchestrator.py release` or document why they remain active.
+- Use the opposite tool's reviewer for cross-tool review: Claude reviews Codex-authored changes, and Codex reviews Claude-authored changes.
 
 Large-codebase harness rules:
 
@@ -351,6 +550,8 @@ Lead with findings. Prioritize correctness, security, user-visible regressions, 
 - Are tests meaningful and close to the risk?
 - Did the implementation follow existing project patterns?
 - Did it introduce same-file ownership conflicts from parallel work?
+- Did Claude Code and Codex claims overlap in `.agent-loop/coordination/ownership.json`?
+- Did the opposite tool review the change when both tools participated?
 - Should any lesson become a pattern, decision, or failure note?
 
 ## Severity
@@ -595,6 +796,8 @@ Use this file as the shared operating contract for Claude Code agent teams and C
 | Implementer | task-specific teammate | worker | Bounded code change with owned files | Patch or handoff |
 | Test Runner | `compound-test-runner` | worker/explorer | Verification strategy and execution | Test results |
 | Reviewer | `compound-reviewer` | explorer/reviewer | Correctness, security, tests, product risk | Findings |
+| Claude Cross-Tool Reviewer | `compound-cross-tool-reviewer` | n/a | Review Codex-authored changes | Cross-tool findings |
+| Codex Cross-Tool Reviewer | n/a | `codex-cross-tool-reviewer` skill | Review Claude-authored changes | Cross-tool findings |
 | Compound Writer | lead or reviewer | local lead | Durable learning | Pattern, decision, failure, or compound note |
 
 ## When To Use A Team
@@ -619,6 +822,7 @@ Do not use a team for:
 - Ask Claude to create an agent team in natural language; Claude creates the runtime team config itself.
 - Reuse plugin or project agent definitions as teammate types.
 - Start with 3-5 teammates and give each teammate a scoped task.
+- Use `compound-cross-tool-reviewer` when reviewing code authored by Codex.
 - Keep runtime team files under `~/.claude/teams/` untouched; they are managed by Claude Code.
 
 ## Codex Parallel-Agent Rules
@@ -629,6 +833,21 @@ Do not use a team for:
 - Workers that edit files must have disjoint ownership.
 - Explorer/reviewer agents should be read-only unless explicitly assigned a patch.
 - The lead should not redo delegated work; integrate results and fill gaps.
+- Use the `codex-cross-tool-reviewer` skill when reviewing code authored by Claude Code.
+
+## Ownership Claims
+
+Before edits, claim files or directories:
+
+```bash
+python scripts/compound_orchestrator.py claim --tool codex --agent codex-worker --task-id TASK --paths src/payments.py tests/test_payments.py --intent "Implement retry handling"
+```
+
+The claim fails if another active Claude or Codex agent already owns an overlapping path. Release claims when done:
+
+```bash
+python scripts/compound_orchestrator.py release --tool codex --agent codex-worker --task-id TASK
+```
 
 ## Shared Handoff
 
@@ -637,8 +856,10 @@ Every team run should leave a note in `docs/compound/` with:
 - task id
 - team members and scopes
 - files owned by each agent
+- ownership conflicts and resolutions
 - verification run
 - review findings
+- cross-tool review result
 - lessons promoted to patterns, decisions, or failures
 """
 
@@ -655,7 +876,11 @@ Codex does not use Claude Code's runtime team config. It should mirror the same 
 - Keep the immediate blocking task local.
 - Delegate bounded sidecar tasks with clear scopes.
 - Prevent overlapping write ownership.
+- Claim intended write paths in `.agent-loop/coordination/ownership.json` before edits.
+- Refuse to edit files actively claimed by Claude Code unless the lead releases or explicitly resolves the claim.
 - Integrate returned work and run verification.
+- Request Claude `compound-cross-tool-reviewer` review for Codex-authored changes when Claude Code is part of the workflow.
+- Run Codex `codex-cross-tool-reviewer` review for Claude-authored changes before integration.
 - Record durable learning before completion.
 
 ## Delegation Prompt Template
@@ -671,6 +896,8 @@ Output artifact:
 Verification responsibility:
 Do not edit outside your ownership scope.
 Do not revert unrelated changes.
+Before editing, claim owned files with `compound_orchestrator.py claim`.
+If the claim fails, stop and report the conflict.
 List changed files and remaining risks in your final answer.
 ```
 
@@ -687,9 +914,43 @@ List changed files and remaining risks in your final answer.
 A Codex team run is complete only when the lead has:
 
 - synthesized agent outputs
+- confirmed no active cross-tool ownership conflict remains
+- completed the opposite-tool review when both Claude Code and Codex participated
 - resolved or accepted review findings
 - run verification or documented the blocker
 - written a compound note under `docs/compound/`
+"""
+
+
+def cross_tool_protocol_template() -> str:
+    return """
+# Cross-Tool Conflict And Review Protocol
+
+Use this protocol whenever Claude Code and Codex may work in the same repository.
+
+## Conflict Prevention
+
+1. Every editing agent claims its intended files or directories before editing.
+2. Claims live in `.agent-loop/coordination/ownership.json`.
+3. A claim fails when it overlaps another active claim from a different agent or tool.
+4. The lead integrator resolves conflicts by narrowing scopes, releasing old claims, or serializing the work.
+5. Agents release claims after their patch is integrated, abandoned, or handed off.
+
+## Cross-Tool Review
+
+- Claude Code uses `compound-cross-tool-reviewer` to review Codex-authored changes.
+- Codex uses `codex-cross-tool-reviewer` to review Claude-authored changes.
+- Cross-review findings are written to `docs/cross-reviews/`.
+- A task involving both tools should not finish until at least one opposite-tool review is complete or the lead documents why it was skipped.
+
+## Commands
+
+```bash
+python scripts/compound_orchestrator.py claim --tool codex --agent codex-worker --task-id TASK --paths src/foo.py
+python scripts/compound_orchestrator.py ownership-status --target .
+python scripts/compound_orchestrator.py cross-review --target . --task-id TASK --reviewer-tool claude --author-tool codex --summary "Reviewed Codex-authored retry handling."
+python scripts/compound_orchestrator.py release --tool codex --agent codex-worker --task-id TASK
+```
 """
 
 
@@ -719,6 +980,8 @@ try {
         ".agent-loop/harness-ownership.md",
         ".agent-loop/team-topology.md",
         ".agent-loop/codex-parallel-contract.md",
+        ".agent-loop/cross-tool-protocol.md",
+        ".agent-loop/coordination/ownership.json",
         "CODEBASE_MAP.md",
         ".claude/settings.json",
         ".claude/commands/compound-init.md",
@@ -871,6 +1134,57 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/compound_orchestrator.py" harness-check -
 
 Summarize missing setup in priority order: navigation, layered `CLAUDE.md`, permissions deny rules, hooks, path-scoped skills, LSP/MCP roadmap, ownership, and review cadence.
 """,
+        ".claude/commands/compound-claim.md": """
+# Compound Claim
+
+Claim files or directories before editing so Claude Code and Codex do not collide.
+
+Run:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/compound_orchestrator.py" claim --target . --tool claude --agent "$USER" --task-id TASK_ID --paths path/to/file.py --intent "Describe planned edit"
+```
+
+If the claim fails, stop and report the existing owner. Do not edit overlapping files until the lead narrows scope or releases the claim.
+""",
+        ".claude/commands/compound-release.md": """
+# Compound Release
+
+Release ownership claims after a patch is integrated, abandoned, or handed off.
+
+Run:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/compound_orchestrator.py" release --target . --tool claude --agent "$USER" --task-id TASK_ID
+```
+""",
+        ".claude/commands/compound-ownership-status.md": """
+# Compound Ownership Status
+
+Show active Claude/Codex ownership claims.
+
+Run:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/compound_orchestrator.py" ownership-status --target .
+```
+""",
+        ".claude/commands/compound-cross-review.md": """
+# Compound Cross Review
+
+Use this when Claude Code reviews Codex-authored changes.
+
+Steps:
+
+1. Inspect active ownership with `compound-ownership-status`.
+2. Review only the Codex-authored diff or paths named by the lead.
+3. Lead with findings ordered by severity.
+4. Write the result:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/compound_orchestrator.py" cross-review --target . --task-id TASK_ID --reviewer-tool claude --author-tool codex --summary "Reviewed Codex-authored changes and found ..."
+```
+""",
     }
 
 
@@ -903,6 +1217,25 @@ tools: Read, Grep, Glob, Bash
 
 You own verification. Find the closest meaningful tests, run them, diagnose failures, and recommend missing coverage. Do not broaden the test surface without explaining why.
 """,
+        ".claude/agents/compound-cross-tool-reviewer.md": """
+---
+name: compound-cross-tool-reviewer
+description: Reviews Codex-authored changes from the Claude Code side and checks for ownership conflicts.
+tools: Read, Grep, Glob, Bash
+---
+
+You are the Claude-side cross-tool reviewer. Review code written by Codex or a Codex worker.
+
+Required checks:
+
+- Inspect `.agent-loop/coordination/ownership.json` for overlapping active claims.
+- Confirm Codex edited only claimed files.
+- Review correctness, tests, security, and maintainability.
+- Do not edit files unless the lead explicitly assigns a patch and ownership has been claimed.
+- Write or request a cross-review artifact in `docs/cross-reviews/`.
+
+Lead with findings. If no findings, say that clearly and list residual risk.
+""",
     }
 
 
@@ -928,11 +1261,13 @@ def init_project(root: Path, *, force: bool = False) -> WriteReport:
         ".agent-loop/harness-ownership.md": ownership_template(),
         ".agent-loop/team-topology.md": team_topology_template(),
         ".agent-loop/codex-parallel-contract.md": codex_parallel_contract_template(),
+        ".agent-loop/cross-tool-protocol.md": cross_tool_protocol_template(),
         "scripts/verify.ps1": verify_script_template(),
         **claude_command_templates(),
         **claude_agent_templates(),
     }.items():
         report.extend(write_file(root, relative, content, force=force))
+    report.extend(save_ownership(root, load_ownership(root)))
 
     return report
 
@@ -1024,6 +1359,10 @@ Mode: `{mode}`
 ## Coordination Notes
 
 - Keep write ownership disjoint.
+- Before edits, every worker claims files with `compound_orchestrator.py claim`.
+- A failed claim means the worker must stop instead of editing.
+- Claude Code reviews Codex-authored changes with `compound-cross-tool-reviewer`.
+- Codex reviews Claude-authored changes with `codex-cross-tool-reviewer`.
 - Teammates should share findings before implementation when coordination is needed.
 - The lead waits for teammates before final synthesis.
 
@@ -1032,7 +1371,14 @@ Mode: `{mode}`
 - Command:
 - Result:
 
+## Ownership
+
+- Status command: `python scripts/compound_orchestrator.py ownership-status --target .`
+- Conflict resolution:
+
 ## Review Findings
+
+## Cross-Tool Review
 
 ## Compound Learning
 """
@@ -1062,6 +1408,7 @@ def note_content(kind: str, title: str, summary: str, task_id: Optional[str]) ->
         "decision": "## Decision\n\n## Alternatives Rejected\n\n## Consequences\n",
         "failure": "## Root Cause\n\n## Fix\n\n## Prevention Rule\n",
         "review": "## Findings\n\n## Verification\n\n## Follow-Up\n",
+        "cross-review": "## Cross-Tool Findings\n\n## Ownership Check\n\n## Verification\n\n## Follow-Up\n",
         "compound": "## What Compounded\n\n## Future Prompting Or Process Change\n",
         "pulse": "## Product Signal\n\n## Recommended Adjustment\n",
         "brainstorm": "## Ideas\n\n## Selected Direction\n",
@@ -1092,6 +1439,62 @@ def learn(root: Path, *, kind: str, title: str, summary: str, task_id: Optional[
     return relative, report
 
 
+def cross_review(
+    root: Path,
+    *,
+    task_id: str,
+    reviewer_tool: str,
+    author_tool: str,
+    summary: str,
+    force: bool = False,
+) -> Tuple[str, WriteReport]:
+    if reviewer_tool not in TOOL_CHOICES:
+        raise ValueError(f"reviewer_tool must be one of: {', '.join(TOOL_CHOICES)}")
+    if author_tool not in TOOL_CHOICES:
+        raise ValueError(f"author_tool must be one of: {', '.join(TOOL_CHOICES)}")
+    if reviewer_tool == author_tool:
+        raise ValueError("cross-tool review requires different reviewer and author tools")
+
+    root = root.resolve()
+    claims = active_claims(root)
+    relevant_claims = [
+        claim
+        for claim in claims
+        if claim.get("task_id") == task_id and claim.get("tool") == author_tool
+    ]
+    claim_lines = "\n".join(
+        f"- `{claim.get('path')}` claimed by {claim.get('tool')}/{claim.get('agent')}: {claim.get('intent', '')}"
+        for claim in relevant_claims
+    ) or "- No active author-tool claims found for this task; reviewer should confirm this is expected."
+    title = f"{reviewer_tool.title()} Review Of {author_tool.title()} Changes"
+    body = f"""
+# {title}
+
+Task id: `{task_id}`
+Reviewer tool: `{reviewer_tool}`
+Author tool: `{author_tool}`
+Date: `{_dt.date.today().isoformat()}`
+
+## Summary
+
+{summary}
+
+## Author Claims Checked
+
+{claim_lines}
+
+## Findings
+
+## Verification
+
+## Follow-Up
+"""
+    relative = f"docs/cross-reviews/{task_id}-{reviewer_tool}-reviews-{author_tool}.md"
+    report = ensure_dirs(root)
+    report.extend(write_file(root, relative, body, force=force))
+    return relative, report
+
+
 def check_project(root: Path, task_id: Optional[str] = None) -> Tuple[bool, List[str]]:
     root = root.resolve()
     failures: List[str] = []
@@ -1116,6 +1519,8 @@ def check_project(root: Path, task_id: Optional[str] = None) -> Tuple[bool, List
         ".agent-loop/harness-ownership.md",
         ".agent-loop/team-topology.md",
         ".agent-loop/codex-parallel-contract.md",
+        ".agent-loop/cross-tool-protocol.md",
+        ".agent-loop/coordination/ownership.json",
         ".claude/settings.json",
         "scripts/verify.ps1",
         ".claude/commands/compound-start.md",
@@ -1125,9 +1530,14 @@ def check_project(root: Path, task_id: Optional[str] = None) -> Tuple[bool, List
         ".claude/commands/compound-init.md",
         ".claude/commands/compound-team-start.md",
         ".claude/commands/compound-harness-check.md",
+        ".claude/commands/compound-claim.md",
+        ".claude/commands/compound-release.md",
+        ".claude/commands/compound-ownership-status.md",
+        ".claude/commands/compound-cross-review.md",
         ".claude/agents/compound-architect.md",
         ".claude/agents/compound-reviewer.md",
         ".claude/agents/compound-test-runner.md",
+        ".claude/agents/compound-cross-tool-reviewer.md",
     ]
     for item in required_files:
         if not (root / item).is_file():
@@ -1158,6 +1568,19 @@ def check_project(root: Path, task_id: Optional[str] = None) -> Tuple[bool, List
                 missing_denies = [item for item in DEFAULT_PERMISSION_DENY if item not in deny]
                 if missing_denies:
                     failures.append(f"Missing default permissions.deny entries: {', '.join(missing_denies)}")
+    ownership = root / OWNERSHIP_FILE
+    if ownership.exists():
+        try:
+            load_ownership(root)
+        except ValueError as exc:
+            failures.append(str(exc))
+        else:
+            for conflict in active_ownership_conflicts(root):
+                failures.append(
+                    "Active ownership conflict: "
+                    f"{conflict['left_tool']}/{conflict['left_agent']} owns {conflict['left_path']} and "
+                    f"{conflict['right_tool']}/{conflict['right_agent']} owns {conflict['right_path']}"
+                )
 
     if task_id:
         task_files = [
@@ -1232,6 +1655,7 @@ def hook_context(stdin_text: str) -> str:
         "- Keep root CLAUDE.md lean; put local commands and conventions in subdirectory CLAUDE.md files.",
         "- Use hooks for automatic behavior and path-scoped skills for specialized expertise.",
         "- Add MCP/LSP only after navigation, permissions, hooks, and ownership are healthy.",
+        "- Before editing in mixed Claude/Codex work, claim files in .agent-loop/coordination/ownership.json.",
     ]
     if (root / "CODEBASE_MAP.md").exists():
         reminders.append("- Navigation map available: CODEBASE_MAP.md")
@@ -1300,9 +1724,15 @@ def self_test(plugin_root: Path) -> Tuple[bool, List[str]]:
         "commands/compound-learn.md",
         "commands/compound-team-start.md",
         "commands/compound-harness-check.md",
+        "commands/compound-claim.md",
+        "commands/compound-release.md",
+        "commands/compound-ownership-status.md",
+        "commands/compound-cross-review.md",
         "agents/compound-architect.agent.md",
         "agents/compound-reviewer.agent.md",
         "agents/compound-test-runner.agent.md",
+        "agents/compound-cross-tool-reviewer.agent.md",
+        "skills/codex-cross-tool-reviewer/SKILL.md",
     ]:
         if not (plugin_root / required).exists():
             failures.append(f"Missing plugin file: {required}")
@@ -1325,6 +1755,36 @@ def self_test(plugin_root: Path) -> Tuple[bool, List[str]]:
         )
         if not (target / f"docs/compound/{team_task_id}-team-run.md").exists():
             failures.append("team-start did not create a team run artifact")
+        try:
+            claim_scope(
+                target,
+                tool="claude",
+                agent="claude-implementer",
+                task_id=team_task_id,
+                paths=["src/demo.py"],
+                intent="Dummy Claude edit",
+            )
+            claim_scope(
+                target,
+                tool="codex",
+                agent="codex-worker",
+                task_id=team_task_id,
+                paths=["src/demo.py"],
+                intent="Dummy Codex edit",
+            )
+            failures.append("overlapping Claude/Codex claims were not rejected")
+        except OwnershipConflict:
+            pass
+        cross_review_path, _ = cross_review(
+            target,
+            task_id=team_task_id,
+            reviewer_tool="codex",
+            author_tool="claude",
+            summary="Dummy cross-tool review completed.",
+        )
+        if not (target / cross_review_path).exists():
+            failures.append("cross-review did not create a review artifact")
+        release_scope(target, tool="claude", agent="claude-implementer", task_id=team_task_id)
         task_id, _ = start_task(target, "Exercise recursive improvement loop", today=_dt.date(2026, 5, 21))
         learn(
             target,
@@ -1404,6 +1864,37 @@ def build_parser() -> argparse.ArgumentParser:
     team_p.add_argument("--force", action="store_true", help="Overwrite existing generated team files.")
     team_p.add_argument("--json", action="store_true", help="Print JSON report.")
 
+    claim_p = sub.add_parser("claim", help="Claim file ownership before Claude/Codex edits.")
+    claim_p.add_argument("--target", default=".", help="Project root.")
+    claim_p.add_argument("--tool", required=True, choices=TOOL_CHOICES, help="Tool claiming ownership.")
+    claim_p.add_argument("--agent", required=True, help="Agent or teammate name.")
+    claim_p.add_argument("--task-id", required=True, help="Task id.")
+    claim_p.add_argument("--paths", nargs="+", required=True, help="Files, directories, or globs to claim.")
+    claim_p.add_argument("--intent", default="", help="Planned edit summary.")
+    claim_p.add_argument("--force", action="store_true", help="Record claim despite conflicts.")
+    claim_p.add_argument("--json", action="store_true", help="Print JSON report.")
+
+    release_p = sub.add_parser("release", help="Release file ownership claims.")
+    release_p.add_argument("--target", default=".", help="Project root.")
+    release_p.add_argument("--tool", choices=TOOL_CHOICES, help="Tool to release.")
+    release_p.add_argument("--agent", help="Agent or teammate name to release.")
+    release_p.add_argument("--task-id", help="Task id to release.")
+    release_p.add_argument("--paths", nargs="+", help="Specific paths to release.")
+    release_p.add_argument("--json", action="store_true", help="Print JSON report.")
+
+    status_p = sub.add_parser("ownership-status", help="Show active file ownership claims.")
+    status_p.add_argument("--target", default=".", help="Project root.")
+    status_p.add_argument("--json", action="store_true", help="Print JSON report.")
+
+    cross_p = sub.add_parser("cross-review", help="Record a Claude/Codex cross-tool review artifact.")
+    cross_p.add_argument("--target", default=".", help="Project root.")
+    cross_p.add_argument("--task-id", required=True, help="Task id.")
+    cross_p.add_argument("--reviewer-tool", required=True, choices=TOOL_CHOICES, help="Tool doing the review.")
+    cross_p.add_argument("--author-tool", required=True, choices=TOOL_CHOICES, help="Tool whose code is being reviewed.")
+    cross_p.add_argument("--summary", required=True, help="Review summary.")
+    cross_p.add_argument("--force", action="store_true", help="Overwrite existing review artifact.")
+    cross_p.add_argument("--json", action="store_true", help="Print JSON report.")
+
     learn_p = sub.add_parser("learn", help="Write a durable compound engineering note.")
     learn_p.add_argument("--target", default=".", help="Project root.")
     learn_p.add_argument("--kind", required=True, choices=sorted(KIND_TO_DIR), help="Note kind.")
@@ -1467,6 +1958,77 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     if args.command == "team-start":
         task_id, report = start_team(Path(args.target), args.title, mode=args.mode, force=args.force)
         print_report(report, json_output=args.json, extra={"task_id": task_id, "mode": args.mode})
+        return 0
+
+    if args.command == "claim":
+        try:
+            report = claim_scope(
+                Path(args.target),
+                tool=args.tool,
+                agent=args.agent,
+                task_id=args.task_id,
+                paths=args.paths,
+                intent=args.intent,
+                force=args.force,
+            )
+        except OwnershipConflict as exc:
+            if args.json:
+                print(json.dumps({"ok": False, "conflicts": exc.conflicts}, indent=2, sort_keys=True))
+            else:
+                print("ownership claim: FAIL")
+                for conflict in exc.conflicts:
+                    print(
+                        "  - "
+                        f"{conflict['requested_path']} overlaps {conflict['existing_path']} "
+                        f"owned by {conflict['existing_tool']}/{conflict['existing_agent']} "
+                        f"for {conflict['existing_task_id']}"
+                    )
+            return 1
+        print_report(report, json_output=args.json, extra={"ok": "true"})
+        return 0
+
+    if args.command == "release":
+        released, report = release_scope(
+            Path(args.target),
+            tool=args.tool,
+            agent=args.agent,
+            task_id=args.task_id,
+            paths=args.paths,
+        )
+        print_report(report, json_output=args.json, extra={"released": str(released)})
+        return 0
+
+    if args.command == "ownership-status":
+        claims = active_claims(Path(args.target))
+        conflicts = active_ownership_conflicts(Path(args.target))
+        if args.json:
+            print(json.dumps({"active_claims": claims, "conflicts": conflicts}, indent=2, sort_keys=True))
+        else:
+            print("active ownership claims:")
+            if not claims:
+                print("  - none")
+            for claim in claims:
+                print(
+                    "  - "
+                    f"{claim.get('path')} owned by {claim.get('tool')}/{claim.get('agent')} "
+                    f"for {claim.get('task_id')}"
+                )
+            if conflicts:
+                print("conflicts:")
+                for conflict in conflicts:
+                    print(f"  - {conflict}")
+        return 1 if conflicts else 0
+
+    if args.command == "cross-review":
+        note_path, report = cross_review(
+            Path(args.target),
+            task_id=args.task_id,
+            reviewer_tool=args.reviewer_tool,
+            author_tool=args.author_tool,
+            summary=args.summary,
+            force=args.force,
+        )
+        print_report(report, json_output=args.json, extra={"note": note_path})
         return 0
 
     if args.command == "learn":
