@@ -28,6 +28,16 @@ Find this plugin directory, then run:
 
 Use the bundled Codex Python when a system Python is not available.
 
+Bootstrap also enables Claude Code agent teams for the project by merging this into `.claude/settings.json`:
+
+```json
+{
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  }
+}
+```
+
 ## During Work
 
 1. Start a task with a stable id:
@@ -60,6 +70,20 @@ Use parallel agents for independent research, planning, test strategy, review, a
 
 Avoid parallel agents for unclear ownership, same-file edits, sequential migrations, and tiny fixes. Codex must still obey the active environment's agent-spawn rules.
 
+For multi-agent runs, use:
+
+```powershell
+& <python> <plugin-root>\scripts\compound_orchestrator.py team-start --target <project-root> --title "<task title>" --mode claude-agent-team
+```
+
+Or for Codex:
+
+```powershell
+& <python> <plugin-root>\scripts\compound_orchestrator.py team-start --target <project-root> --title "<task title>" --mode codex-parallel-agents
+```
+
+Claude Code should create an agent team only when teammate-to-teammate coordination is useful. Codex should mirror the same topology with a lead-integrator hub plus explorer, worker, test-runner, and reviewer agents, each with disjoint scopes.
+
 ## Claude Code Integration
 
 The initializer writes `.claude/commands` and `.claude/agents` templates. These are intentionally plain Markdown so a project can keep them under version control and adapt them.
@@ -74,5 +98,7 @@ Prefer durable notes over chat-only conclusions:
 - `docs/reviews/`
 - `docs/compound/`
 - `.agent-loop/eval-scorecard.md`
+- `.agent-loop/team-topology.md`
+- `.agent-loop/codex-parallel-contract.md`
 
 If a lesson should affect all future work, update the managed compound block in `AGENTS.md` and `CLAUDE.md`.

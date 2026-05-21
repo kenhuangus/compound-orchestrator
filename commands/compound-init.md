@@ -18,3 +18,5 @@ Then summarize the created files and the daily loop:
 ```text
 brainstorm -> plan -> work -> review -> compound
 ```
+
+Also confirm that `.claude/settings.json` enables Claude Code agent teams with `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, and point Codex users to `.agent-loop/codex-parallel-contract.md` for the matching parallel-agent workflow.

@@ -22,9 +22,15 @@ class CompoundOrchestratorTests(unittest.TestCase):
 
             self.assertTrue(ok, failures)
             self.assertIn("AGENTS.md", report.created)
+            self.assertTrue((root / ".claude/commands/compound-init.md").is_file())
             self.assertTrue((root / ".claude/commands/compound-start.md").is_file())
+            self.assertTrue((root / ".claude/commands/compound-team-start.md").is_file())
             self.assertTrue((root / ".claude/agents/compound-reviewer.md").is_file())
+            self.assertTrue((root / ".agent-loop/team-topology.md").is_file())
+            self.assertTrue((root / ".agent-loop/codex-parallel-contract.md").is_file())
             self.assertTrue((root / "scripts/verify.ps1").is_file())
+            settings = json.loads((root / ".claude/settings.json").read_text(encoding="utf-8"))
+            self.assertEqual(settings["env"][co.CLAUDE_AGENT_TEAM_ENV], "1")
             self.assertIn(co.MANAGED_START, (root / "AGENTS.md").read_text(encoding="utf-8"))
             self.assertIn(co.MANAGED_START, (root / "CLAUDE.md").read_text(encoding="utf-8"))
 
@@ -42,6 +48,32 @@ class CompoundOrchestratorTests(unittest.TestCase):
             self.assertIn("Keep this too.", claude)
             self.assertIn(co.MANAGED_START, agents)
             self.assertIn(co.MANAGED_END, claude)
+
+    def test_init_preserves_existing_claude_settings_env(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            settings_path = root / ".claude/settings.json"
+            settings_path.parent.mkdir(parents=True)
+            settings_path.write_text(
+                json.dumps(
+                    {
+                        "env": {
+                            "EXISTING_FLAG": "kept",
+                        },
+                        "permissions": {
+                            "allow": ["Bash(npm test)"],
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            co.init_project(root)
+
+            settings = json.loads(settings_path.read_text(encoding="utf-8"))
+            self.assertEqual(settings["env"]["EXISTING_FLAG"], "kept")
+            self.assertEqual(settings["env"][co.CLAUDE_AGENT_TEAM_ENV], "1")
+            self.assertEqual(settings["permissions"]["allow"], ["Bash(npm test)"])
 
     def test_check_fails_before_init_and_passes_after_init(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -91,6 +123,25 @@ class CompoundOrchestratorTests(unittest.TestCase):
             ok, failures = co.check_project(root, task_id=task_id)
             self.assertTrue(ok, failures)
 
+    def test_team_start_creates_shared_team_run_artifact(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            co.init_project(root)
+
+            task_id, report = co.start_team(
+                root,
+                "Coordinate agents",
+                mode="codex-parallel-agents",
+                today=dt.date(2026, 5, 21),
+            )
+
+            self.assertEqual(task_id, "2026-05-21-coordinate-agents")
+            team_run = f"docs/compound/{task_id}-team-run.md"
+            self.assertIn(team_run, report.created)
+            text = (root / team_run).read_text(encoding="utf-8")
+            self.assertIn("Mode: `codex-parallel-agents`", text)
+            self.assertIn(".agent-loop/team-topology.md", text)
+
     def test_learn_writes_slugged_pattern_note(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -125,6 +176,7 @@ class CompoundOrchestratorTests(unittest.TestCase):
         self.assertTrue((ROOT / "commands").is_dir())
         self.assertTrue((ROOT / "agents").is_dir())
         self.assertTrue((ROOT / "skills").is_dir())
+        self.assertTrue((ROOT / "commands/compound-team-start.md").is_file())
 
     def test_self_test_passes(self):
         ok, failures = co.self_test(ROOT)

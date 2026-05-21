@@ -6,6 +6,8 @@ It complements the EveryInc Compound Engineering plugin by adding project-level 
 
 - shared Codex and Claude Code operating memory
 - Claude slash-command and subagent templates
+- Claude Code agent-team enablement
+- a Codex parallel-agent contract that mirrors the same team topology
 - task brief, review, handoff, and scorecard templates
 - a verification adapter
 - a completion gate that checks for plan, review, and compound artifacts
@@ -30,6 +32,16 @@ $py = "C:\Users\kenhu\.cache\codex-runtimes\codex-primary-runtime\dependencies\p
 
 The initializer is conservative. It creates missing files and directories, and it appends managed compound-engineering blocks to existing `AGENTS.md` and `CLAUDE.md` instead of replacing them.
 
+It also merges the Claude Code agent-team flag into `.claude/settings.json`:
+
+```json
+{
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  }
+}
+```
+
 ## Daily Use
 
 Start a task:
@@ -50,6 +62,18 @@ Check completion gates:
 & $py .\scripts\compound_orchestrator.py check --target . --task-id 2026-05-21-add-billing-webhook-retry-handling
 ```
 
+Start a coordinated team run:
+
+```powershell
+& $py .\scripts\compound_orchestrator.py team-start --target . --title "Refactor checkout flow" --mode claude-agent-team
+```
+
+For Codex, use the same topology but make Codex the lead integrator:
+
+```powershell
+& $py .\scripts\compound_orchestrator.py team-start --target . --title "Refactor checkout flow" --mode codex-parallel-agents
+```
+
 ## Claude Code
 
 This repository includes a native Claude Code plugin manifest at `.claude-plugin/plugin.json`. For local testing:
@@ -66,13 +90,18 @@ claude plugin validate .
 - `/compound-review`
 - `/compound-learn`
 - `/compound-init`
+- `/compound-team-start`
 - `compound-architect`
 - `compound-reviewer`
 - `compound-test-runner`
 
+Claude Code agent teams are experimental and disabled by default, so `init` writes the required project setting. The runtime team config is still created and managed by Claude Code under `~/.claude/teams/`; this plugin only enables the feature and supplies reusable teammate roles plus the shared topology in `.agent-loop/team-topology.md`.
+
 ## Codex
 
 The Codex skill in `skills/compound-orchestrator/SKILL.md` teaches Codex to use the same loop and the same artifacts. Codex remains responsible for respecting local workspace safety, test execution, and agent-spawn rules.
+
+For Codex multi-agent work, use `.agent-loop/codex-parallel-contract.md`. Codex does not share Claude's runtime team mailbox, so the lead Codex session acts as the hub: it spawns bounded explorer/worker/reviewer agents, prevents same-file ownership conflicts, integrates results, verifies, and writes the compound note.
 
 ## Test
 

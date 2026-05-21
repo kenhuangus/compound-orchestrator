@@ -32,6 +32,8 @@ REQUIRED_DIRS = [
     "scripts",
 ]
 
+CLAUDE_AGENT_TEAM_ENV = "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"
+
 KIND_TO_DIR = {
     "brainstorm": "docs/brainstorms",
     "plan": "docs/plans",
@@ -114,6 +116,51 @@ def write_file(root: Path, relative: str, content: str, *, force: bool = False) 
     return report
 
 
+def write_json_file(root: Path, relative: str, data: Dict[str, object]) -> WriteReport:
+    report = WriteReport()
+    path = root / relative
+    serialized = json.dumps(data, indent=2, sort_keys=True) + "\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        existing = path.read_text(encoding="utf-8")
+        if existing == serialized:
+            report.skipped.append(relative)
+            return report
+        path.write_text(serialized, encoding="utf-8", newline="\n")
+        report.updated.append(relative)
+        return report
+    path.write_text(serialized, encoding="utf-8", newline="\n")
+    report.created.append(relative)
+    return report
+
+
+def merge_claude_settings(root: Path) -> WriteReport:
+    relative = ".claude/settings.json"
+    path = root / relative
+    existed = path.exists()
+    if existed:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"{relative} is not valid JSON: {exc}") from exc
+        if not isinstance(data, dict):
+            raise ValueError(f"{relative} must contain a JSON object")
+    else:
+        data = {
+            "$schema": "https://json.schemastore.org/claude-code-settings.json",
+        }
+
+    env = data.get("env")
+    if env is None:
+        env = {}
+    if not isinstance(env, dict):
+        raise ValueError(f"{relative}.env must be a JSON object when present")
+    env[CLAUDE_AGENT_TEAM_ENV] = "1"
+    data["env"] = env
+
+    return write_json_file(root, relative, data)
+
+
 def upsert_managed_block(root: Path, relative: str, title: str, body: str) -> WriteReport:
     report = WriteReport()
     path = root / relative
@@ -162,9 +209,12 @@ Completion gate:
 
 Parallel agent policy:
 
+- Use `.agent-loop/team-topology.md` as the shared Claude/Codex team contract.
 - Use parallel agents for independent research, planning, test strategy, review, and competing bug hypotheses.
 - Give each agent a role, scope, owned files, expected artifact, and verification responsibility.
 - Avoid parallel edits to the same file unless a lead integrator owns the final merge.
+- Claude Code should use agent teams when work benefits from teammate-to-teammate coordination.
+- Codex should mirror the same team shape with a lead-integrator hub plus explorer/worker/reviewer agents; workers must have disjoint write scopes.
 """
 
 
@@ -288,6 +338,119 @@ Use this after each meaningful task.
 """
 
 
+def team_topology_template() -> str:
+    return """
+# Compound Agent Team Topology
+
+Use this file as the shared operating contract for Claude Code agent teams and Codex parallel-agent runs.
+
+## Default Team
+
+| Role | Claude Code Teammate Type | Codex Role | Scope | Output |
+| --- | --- | --- | --- | --- |
+| Lead Integrator | lead session | local lead | Plan, assign, synthesize, integrate | Final diff and summary |
+| Architect | `compound-architect` | explorer | Existing patterns, design, risks | Architecture notes |
+| Implementer | task-specific teammate | worker | Bounded code change with owned files | Patch or handoff |
+| Test Runner | `compound-test-runner` | worker/explorer | Verification strategy and execution | Test results |
+| Reviewer | `compound-reviewer` | explorer/reviewer | Correctness, security, tests, product risk | Findings |
+| Compound Writer | lead or reviewer | local lead | Durable learning | Pattern, decision, failure, or compound note |
+
+## When To Use A Team
+
+Use a team for:
+
+- research and review
+- competing debugging hypotheses
+- new modules with separable ownership
+- cross-layer work where frontend, backend, and tests can be owned separately
+
+Do not use a team for:
+
+- tiny fixes
+- sequential migrations
+- same-file edits
+- work without a clear verification path
+
+## Claude Code Team Rules
+
+- `.claude/settings.json` must set `env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` to `"1"`.
+- Ask Claude to create an agent team in natural language; Claude creates the runtime team config itself.
+- Reuse plugin or project agent definitions as teammate types.
+- Start with 3-5 teammates and give each teammate a scoped task.
+- Keep runtime team files under `~/.claude/teams/` untouched; they are managed by Claude Code.
+
+## Codex Parallel-Agent Rules
+
+- The lead Codex session owns decomposition, final synthesis, and integration.
+- Spawn agents only for independent work that materially advances the task.
+- Give every spawned agent: role, goal, read/write scope, output artifact, and verification responsibility.
+- Workers that edit files must have disjoint ownership.
+- Explorer/reviewer agents should be read-only unless explicitly assigned a patch.
+- The lead should not redo delegated work; integrate results and fill gaps.
+
+## Shared Handoff
+
+Every team run should leave a note in `docs/compound/` with:
+
+- task id
+- team members and scopes
+- files owned by each agent
+- verification run
+- review findings
+- lessons promoted to patterns, decisions, or failures
+"""
+
+
+def codex_parallel_contract_template() -> str:
+    return """
+# Codex Parallel-Agent Contract
+
+Codex does not use Claude Code's runtime team config. It should mirror the same compound team topology with a lead-agent hub.
+
+## Lead Responsibilities
+
+- Decide whether parallel agents are useful.
+- Keep the immediate blocking task local.
+- Delegate bounded sidecar tasks with clear scopes.
+- Prevent overlapping write ownership.
+- Integrate returned work and run verification.
+- Record durable learning before completion.
+
+## Delegation Prompt Template
+
+```text
+You are not alone in this codebase. Other agents may be working in parallel.
+
+Role:
+Goal:
+Owned files or modules:
+Read-only context:
+Output artifact:
+Verification responsibility:
+Do not edit outside your ownership scope.
+Do not revert unrelated changes.
+List changed files and remaining risks in your final answer.
+```
+
+## Recommended Parallel Lanes
+
+- Explorer: read-only codebase pattern research.
+- Architect: plan decomposition and risks.
+- Worker: bounded implementation in owned files.
+- Test Runner: test design, execution, failure diagnosis.
+- Reviewer: diff review against `.agent-loop/review-rubric.md`.
+
+## Completion Gate
+
+A Codex team run is complete only when the lead has:
+
+- synthesized agent outputs
+- resolved or accepted review findings
+- run verification or documented the blocker
+- written a compound note under `docs/compound/`
+"""
+
+
 def verify_script_template() -> str:
     return r"""
 param(
@@ -306,13 +469,23 @@ try {
         "STRATEGY.md",
         ".agent-loop/task-brief-template.md",
         ".agent-loop/review-rubric.md",
-        ".agent-loop/eval-scorecard.md"
+        ".agent-loop/eval-scorecard.md",
+        ".agent-loop/team-topology.md",
+        ".agent-loop/codex-parallel-contract.md",
+        ".claude/settings.json",
+        ".claude/commands/compound-init.md",
+        ".claude/commands/compound-team-start.md"
     )
 
     foreach ($item in $required) {
         if (-not (Test-Path -LiteralPath $item)) {
             throw "Missing required compound file: $item"
         }
+    }
+
+    $settings = Get-Content -Raw ".claude/settings.json" | ConvertFrom-Json
+    if (-not $settings.env -or $settings.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS -ne "1") {
+        throw "Missing Claude agent-team flag in .claude/settings.json"
     }
 
     if ($CompoundOnly) {
@@ -342,6 +515,20 @@ finally {
 
 def claude_command_templates() -> Dict[str, str]:
     return {
+        ".claude/commands/compound-init.md": """
+# Compound Init
+
+Initialize this repository for compound engineering.
+
+Run:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/compound_orchestrator.py" init --target .
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/compound_orchestrator.py" check --target .
+```
+
+Confirm that `.claude/settings.json` enables Claude Code agent teams with `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, and use `.agent-loop/codex-parallel-contract.md` for the matching Codex parallel-agent workflow.
+""",
         ".claude/commands/compound-start.md": """
 # Compound Start
 
@@ -389,6 +576,36 @@ Record at least one of:
 
 Update `AGENTS.md` and `CLAUDE.md` only when the lesson should affect all future work.
 """,
+        ".claude/commands/compound-team-start.md": """
+# Compound Team Start
+
+Create a Claude Code agent team for work that benefits from inter-agent coordination.
+
+Prerequisites:
+
+- `.claude/settings.json` contains `env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` set to `"1"`.
+- `.agent-loop/team-topology.md` defines roles, scopes, and completion gates.
+- The task has separable lanes and disjoint write ownership.
+
+Steps:
+
+1. Create or update a plan with `compound-start`.
+2. Create a team run note in `docs/compound/`.
+3. Ask Claude to create an agent team with 3-5 teammates.
+4. Use project or plugin teammate types: `compound-architect`, `compound-test-runner`, and `compound-reviewer`.
+5. Assign each teammate a scoped task, owned files, output artifact, and verification responsibility.
+6. Wait for teammates to finish before synthesis.
+7. Write a compound note before declaring completion.
+
+Starter prompt:
+
+```text
+Create an agent team for this task. Use `.agent-loop/team-topology.md`.
+Spawn a `compound-architect`, a `compound-test-runner`, and a `compound-reviewer`.
+Only add an implementer teammate if the write scope is disjoint and clear.
+Keep the team to 3-5 teammates, wait for them to finish, synthesize findings, run verification, and write a compound note.
+```
+""",
     }
 
 
@@ -430,6 +647,7 @@ def init_project(root: Path, *, force: bool = False) -> WriteReport:
 
     report.extend(upsert_managed_block(root, "AGENTS.md", "Agent Instructions", common_protocol_block("Codex")))
     report.extend(upsert_managed_block(root, "CLAUDE.md", "Claude Instructions", common_protocol_block("Claude Code")))
+    report.extend(merge_claude_settings(root))
 
     for relative, content in {
         "STRATEGY.md": strategy_template(),
@@ -437,6 +655,8 @@ def init_project(root: Path, *, force: bool = False) -> WriteReport:
         ".agent-loop/handoff-template.md": handoff_template(),
         ".agent-loop/review-rubric.md": review_rubric_template(),
         ".agent-loop/eval-scorecard.md": scorecard_template(),
+        ".agent-loop/team-topology.md": team_topology_template(),
+        ".agent-loop/codex-parallel-contract.md": codex_parallel_contract_template(),
         "scripts/verify.ps1": verify_script_template(),
         **claude_command_templates(),
         **claude_agent_templates(),
@@ -508,6 +728,61 @@ def start_task(root: Path, title: str, *, today: Optional[_dt.date] = None, forc
     return task_id, report
 
 
+def team_run_content(task_id: str, title: str, mode: str) -> str:
+    return f"""
+# Team Run: {title}
+
+Task id: `{task_id}`
+Mode: `{mode}`
+
+## Shared Contract
+
+- `.agent-loop/team-topology.md`
+- `.agent-loop/codex-parallel-contract.md`
+- `.agent-loop/review-rubric.md`
+
+## Team Members
+
+| Agent | Runtime | Role | Owned Files Or Scope | Output Artifact | Status |
+| --- | --- | --- | --- | --- | --- |
+| Lead Integrator | {mode} | Synthesis and integration | TBD | Final diff and summary | Pending |
+| Architect | {mode} | Existing patterns and risks | Read-only | Architecture notes | Pending |
+| Test Runner | {mode} | Verification | Tests and commands | Test results | Pending |
+| Reviewer | {mode} | Findings and learning | Read-only | Review findings | Pending |
+
+## Coordination Notes
+
+- Keep write ownership disjoint.
+- Teammates should share findings before implementation when coordination is needed.
+- The lead waits for teammates before final synthesis.
+
+## Verification
+
+- Command:
+- Result:
+
+## Review Findings
+
+## Compound Learning
+"""
+
+
+def start_team(
+    root: Path,
+    title: str,
+    *,
+    mode: str = "claude-agent-team",
+    today: Optional[_dt.date] = None,
+    force: bool = False,
+) -> Tuple[str, WriteReport]:
+    root = root.resolve()
+    report = init_project(root, force=force)
+    task_id, task_report = start_task(root, title, today=today, force=force)
+    report.extend(task_report)
+    report.extend(write_file(root, f"docs/compound/{task_id}-team-run.md", team_run_content(task_id, title, mode), force=force))
+    return task_id, report
+
+
 def note_content(kind: str, title: str, summary: str, task_id: Optional[str]) -> str:
     date = _dt.date.today().isoformat()
     task_line = f"Task id: `{task_id}`\n" if task_id else ""
@@ -562,11 +837,16 @@ def check_project(root: Path, task_id: Optional[str] = None) -> Tuple[bool, List
         ".agent-loop/handoff-template.md",
         ".agent-loop/review-rubric.md",
         ".agent-loop/eval-scorecard.md",
+        ".agent-loop/team-topology.md",
+        ".agent-loop/codex-parallel-contract.md",
+        ".claude/settings.json",
         "scripts/verify.ps1",
         ".claude/commands/compound-start.md",
         ".claude/commands/compound-plan.md",
         ".claude/commands/compound-review.md",
         ".claude/commands/compound-learn.md",
+        ".claude/commands/compound-init.md",
+        ".claude/commands/compound-team-start.md",
         ".claude/agents/compound-architect.md",
         ".claude/agents/compound-reviewer.md",
         ".claude/agents/compound-test-runner.md",
@@ -581,6 +861,17 @@ def check_project(root: Path, task_id: Optional[str] = None) -> Tuple[bool, List
             text = path.read_text(encoding="utf-8")
             if MANAGED_START not in text or MANAGED_END not in text:
                 failures.append(f"Missing managed compound block in {item}")
+
+    settings = root / ".claude/settings.json"
+    if settings.exists():
+        try:
+            settings_data = json.loads(settings.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            failures.append(f"Invalid JSON in .claude/settings.json: {exc}")
+        else:
+            env = settings_data.get("env")
+            if not isinstance(env, dict) or env.get(CLAUDE_AGENT_TEAM_ENV) != "1":
+                failures.append(f"Missing Claude agent team env flag: env.{CLAUDE_AGENT_TEAM_ENV} = \"1\"")
 
     if task_id:
         task_files = [
@@ -647,6 +938,7 @@ def self_test(plugin_root: Path) -> Tuple[bool, List[str]]:
         "commands/compound-plan.md",
         "commands/compound-review.md",
         "commands/compound-learn.md",
+        "commands/compound-team-start.md",
         "agents/compound-architect.agent.md",
         "agents/compound-reviewer.agent.md",
         "agents/compound-test-runner.agent.md",
@@ -661,6 +953,14 @@ def self_test(plugin_root: Path) -> Tuple[bool, List[str]]:
         ok, check_failures = check_project(target)
         if not ok:
             failures.extend(f"bootstrap check: {item}" for item in check_failures)
+        team_task_id, _ = start_team(
+            target,
+            "Exercise team orchestration",
+            mode="codex-parallel-agents",
+            today=_dt.date(2026, 5, 21),
+        )
+        if not (target / f"docs/compound/{team_task_id}-team-run.md").exists():
+            failures.append("team-start did not create a team run artifact")
         task_id, _ = start_task(target, "Exercise recursive improvement loop", today=_dt.date(2026, 5, 21))
         learn(
             target,
@@ -722,6 +1022,18 @@ def build_parser() -> argparse.ArgumentParser:
     start_p.add_argument("--force", action="store_true", help="Overwrite existing generated task files.")
     start_p.add_argument("--json", action="store_true", help="Print JSON report.")
 
+    team_p = sub.add_parser("team-start", help="Create task artifacts for a Claude or Codex multi-agent run.")
+    team_p.add_argument("--target", default=".", help="Project root.")
+    team_p.add_argument("--title", required=True, help="Task title.")
+    team_p.add_argument(
+        "--mode",
+        default="claude-agent-team",
+        choices=["claude-agent-team", "codex-parallel-agents"],
+        help="Runtime mode for the team run artifact.",
+    )
+    team_p.add_argument("--force", action="store_true", help="Overwrite existing generated team files.")
+    team_p.add_argument("--json", action="store_true", help="Print JSON report.")
+
     learn_p = sub.add_parser("learn", help="Write a durable compound engineering note.")
     learn_p.add_argument("--target", default=".", help="Project root.")
     learn_p.add_argument("--kind", required=True, choices=sorted(KIND_TO_DIR), help="Note kind.")
@@ -762,6 +1074,11 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     if args.command == "start":
         task_id, report = start_task(Path(args.target), args.title, force=args.force)
         print_report(report, json_output=args.json, extra={"task_id": task_id})
+        return 0
+
+    if args.command == "team-start":
+        task_id, report = start_team(Path(args.target), args.title, mode=args.mode, force=args.force)
+        print_report(report, json_output=args.json, extra={"task_id": task_id, "mode": args.mode})
         return 0
 
     if args.command == "learn":
