@@ -14,8 +14,19 @@ No meaningful task starts without a task brief or plan. No meaningful task finis
 The loop is:
 
 ```text
-brainstorm -> plan -> work -> review -> compound -> repeat
+brainstorm -> plan -> six planning contracts -> two-round review -> work -> two-round review -> compound -> repeat
 ```
+
+Substantial projects must complete these core planning contracts before implementation:
+
+1. `prd.html`
+2. `planning.html`
+3. `spec.html`
+4. `test-cases.html`
+5. `architecture.html` with an Excalidraw-compatible `architecture.excalidraw`
+6. `users.html`
+
+Planning is dependency-aware: parallelize PRD, users, architecture, planning, and early test strategy; then serialize integration, `spec.html`, `test-cases.html`, two-round review, and final acceptance.
 
 ## Bootstrap
 
@@ -47,6 +58,8 @@ Bootstrap also enables Claude Code agent teams for the project by merging this i
 ```
 
 It also installs project harness templates: `README.md` policy block, `CODEBASE_MAP.md`, `.agent-loop/readme-maintenance.md`, `.agent-loop/harness-checklist.md`, `.agent-loop/module-claude-template.md`, `.agent-loop/path-scoped-skill-template.md`, `.agent-loop/lsp-mcp-roadmap.md`, and `.agent-loop/harness-ownership.md`.
+
+It also installs the six core planning artifacts (`prd.html`, `planning.html`, `spec.html`, `test-cases.html`, `architecture.html`, `architecture.excalidraw`, and `users.html`) plus `.agent-loop/core-planning-artifacts.md`, `.agent-loop/two-round-review-protocol.md`, `.agent-loop/parallel-agent-team-protocol.md`, and `.agent-loop/deliverables-checklist.md`.
 
 It also installs cross-tool coordination files:
 
@@ -96,15 +109,29 @@ It also installs cross-tool coordination files:
 
 If the claim fails, stop instead of editing. Ask the lead integrator to narrow scope, release stale claims, or serialize the work.
 
-10. Record opposite-tool review:
+10. Record the two-round opposite-tool review:
 
 ```powershell
-& <python> <plugin-root>\scripts\compound_orchestrator.py cross-review --target <project-root> --task-id <task-id> --reviewer-tool codex --author-tool claude --summary "<findings summary>"
+& <python> <plugin-root>\scripts\compound_orchestrator.py cross-review --target <project-root> --task-id <task-id> --reviewer-tool codex --author-tool claude --stage round-1-review --summary "<findings summary>"
+& <python> <plugin-root>\scripts\compound_orchestrator.py cross-review --target <project-root> --task-id <task-id> --reviewer-tool claude --author-tool codex --stage round-1-response --summary "<revision summary>"
+& <python> <plugin-root>\scripts\compound_orchestrator.py cross-review --target <project-root> --task-id <task-id> --reviewer-tool codex --author-tool claude --stage round-2-review --summary "<findings summary>"
+& <python> <plugin-root>\scripts\compound_orchestrator.py cross-review --target <project-root> --task-id <task-id> --reviewer-tool claude --author-tool codex --stage round-2-response --summary "<revision summary>"
+& <python> <plugin-root>\scripts\compound_orchestrator.py cross-review --target <project-root> --task-id <task-id> --reviewer-tool codex --author-tool claude --stage final-acceptance --summary "<acceptance summary>"
 ```
+
+Stop after two rounds unless the user explicitly asks for another loop.
 
 ## Parallel Agent Policy
 
 Use parallel agents for independent research, planning, test strategy, review, and competing bug hypotheses. Give every agent a role, scope, owned files, output artifact, and verification responsibility.
+
+For planning, use dependency-aware phases:
+
+1. Parallel draft `prd.html`, `users.html`, `architecture.html`, `planning.html`, and early test risks.
+2. Lead integrator reconciles conflicts.
+3. Spec agent writes `spec.html`.
+4. Test-case agent writes `test-cases.html` from `spec.html`.
+5. Run two cross-review rounds and record final acceptance.
 
 Avoid parallel agents for unclear ownership, same-file edits, sequential migrations, and tiny fixes. Codex must still obey the active environment's agent-spawn rules.
 
@@ -157,6 +184,10 @@ Prefer durable notes over chat-only conclusions:
 - `.agent-loop/team-topology.md`
 - `.agent-loop/codex-parallel-contract.md`
 - `.agent-loop/cross-tool-protocol.md`
+- `.agent-loop/core-planning-artifacts.md`
+- `.agent-loop/two-round-review-protocol.md`
+- `.agent-loop/parallel-agent-team-protocol.md`
+- `.agent-loop/deliverables-checklist.md`
 - `.agent-loop/harness-checklist.md`
 - `.agent-loop/lsp-mcp-roadmap.md`
 - `.agent-loop/harness-ownership.md`

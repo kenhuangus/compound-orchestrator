@@ -1,6 +1,6 @@
 [project]
 name = "compound-orchestrator"
-version = "0.1.0"
+version = "0.3.0"
 description = "Project bootstrapper for a Codex and Claude Code compound engineering loop."
 readme = "README.md"
 requires-python = ">=3.9"

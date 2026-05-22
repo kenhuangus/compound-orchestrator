@@ -1,6 +1,6 @@
 {
   "name": "compound-orchestrator",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Enforce a cross-platform compound engineering loop across Claude Code, Codex, and other agent-managed projects.",
   "author": {
     "name": "Ken Huang",

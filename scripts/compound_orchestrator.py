@@ -68,6 +68,23 @@ OWNERSHIP_FILE = ".agent-loop/coordination/ownership.json"
 SUGGESTED_TOOL_NAMES = ["claude", "codex", "cursor", "aider", "other"]
 TOOL_NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{1,39}$")
 
+CORE_PLANNING_ARTIFACTS = [
+    "prd.html",
+    "planning.html",
+    "spec.html",
+    "test-cases.html",
+    "architecture.html",
+    "users.html",
+]
+
+CROSS_REVIEW_STAGES = [
+    "round-1-review",
+    "round-1-response",
+    "round-2-review",
+    "round-2-response",
+    "final-acceptance",
+]
+
 
 @dataclass
 class WriteReport:
@@ -446,20 +463,22 @@ def common_protocol_block(tool_name: str) -> str:
 Use this repository as a compound engineering system for coding, writing, research, documentation, or mixed project work:
 
 1. Start meaningful work with a task brief or plan in `docs/plans/`.
-2. Keep implementation scoped to the plan unless new evidence changes it.
-3. Run `scripts/verify.py`, `scripts/verify.ps1`, `scripts/verify.sh`, or the closest project-specific verification before completion.
-4. Review changes for bugs, missing tests, security risks, product regressions, factual drift, stale documentation, and unclear writing.
-5. Record durable learning in `docs/patterns/`, `docs/decisions/`, `docs/failures/`, or `docs/compound/`.
-6. Keep `README.md` current by removing stale information, preserving still-true information, adding new content, and reorganizing it into an easy-to-follow narrative.
+2. For substantial projects, complete the six planning contracts: `prd.html`, `planning.html`, `spec.html`, `test-cases.html`, `architecture.html`, and `users.html`.
+3. Keep implementation scoped to the plan unless new evidence changes it.
+4. Run `scripts/verify.py`, `scripts/verify.ps1`, `scripts/verify.sh`, or the closest project-specific verification before completion.
+5. Review changes for bugs, missing tests, security risks, product regressions, factual drift, stale documentation, and unclear writing.
+6. Record durable learning in `docs/patterns/`, `docs/decisions/`, `docs/failures/`, or `docs/compound/`.
+7. Keep `README.md` current by removing stale information, preserving still-true information, adding new content, and reorganizing it into an easy-to-follow narrative.
 
 Completion gate:
 
 - A plan exists for the task.
+- The six planning contracts are accepted before implementation starts on substantial projects.
 - Any files edited by Claude Code or Codex are claimed in `.agent-loop/coordination/ownership.json` before edits.
 - No active ownership claim overlaps another agent's claim unless the lead explicitly resolves the conflict.
 - A cross-tool review exists when Claude Code reviews Codex-authored changes or Codex reviews Claude-authored changes.
 - Verification was run or the blocker is documented.
-- Review findings are resolved or explicitly accepted.
+- Two cross-review rounds are complete and author responses are recorded; stop after two rounds unless the user asks for more.
 - `README.md` reflects the latest project state when the task changes setup, usage, architecture, workflow, output, or audience-facing behavior.
 - A compound note records what future work should reuse or avoid.
 
@@ -467,6 +486,7 @@ Parallel agent policy:
 
 - Use `.agent-loop/team-topology.md` as the shared Claude/Codex team contract.
 - Use parallel agents for independent research, planning, test strategy, review, and competing bug hypotheses.
+- Parallelize planning drafts, then serialize integration, `spec.html`, `test-cases.html`, and final acceptance.
 - Give each agent a role, scope, owned files, expected artifact, and verification responsibility.
 - Avoid parallel edits to the same file unless a lead integrator owns the final merge.
 - Claude Code should use agent teams when work benefits from teammate-to-teammate coordination.
@@ -932,7 +952,12 @@ Use this file as the shared operating contract for Claude Code agent teams and C
 | Role | Claude Code Teammate Type | Codex Role | Scope | Output |
 | --- | --- | --- | --- | --- |
 | Lead Integrator | lead session | local lead | Plan, assign, synthesize, integrate | Final diff and summary |
+| PRD Agent | task-specific teammate | worker | Product requirements contract | `prd.html` |
+| Users Agent | task-specific teammate | worker | User roles and workflows | `users.html` |
 | Architect | `compound-architect` | explorer | Existing patterns, design, risks | Architecture notes |
+| Planning Agent | task-specific teammate | worker | Delivery plan | `planning.html` |
+| Spec Agent | task-specific teammate | worker | Behavior, state, data, validation, and acceptance contract | `spec.html` |
+| Test Case Agent | `compound-test-runner` | worker/explorer | Happy paths, edge cases, errors, performance, workflows | `test-cases.html` |
 | Implementer | task-specific teammate | worker | Bounded work product with owned files | Patch, draft, or handoff |
 | Test Runner | `compound-test-runner` | worker/explorer | Verification strategy and execution | Test results |
 | Reviewer | `compound-reviewer` | explorer/reviewer | Correctness, security, tests, product risk | Findings |
@@ -944,6 +969,7 @@ Use this file as the shared operating contract for Claude Code agent teams and C
 
 Use a team for:
 
+- dependency-aware planning across PRD, users, architecture, planning, spec, and tests
 - research and review
 - competing debugging hypotheses
 - new modules with separable ownership
@@ -975,6 +1001,7 @@ Do not use a team for:
 - Explorer/reviewer agents should be read-only unless explicitly assigned a patch.
 - The lead should not redo delegated work; integrate results and fill gaps.
 - Use the `codex-cross-tool-reviewer` skill when reviewing work authored by Claude Code or another agent runtime.
+- Planning runs should parallelize independent drafts, then serialize integration, `spec.html`, `test-cases.html`, two-round review, and final acceptance.
 
 ## Ownership Claims
 
@@ -1001,6 +1028,7 @@ Every team run should leave a note in `docs/compound/` with:
 - verification run
 - review findings
 - cross-tool review result
+- two-round review responses and final acceptance
 - lessons promoted to patterns, decisions, or failures
 """
 
@@ -1045,6 +1073,12 @@ List changed files and remaining risks in your final answer.
 
 ## Recommended Parallel Lanes
 
+- PRD: `prd.html`.
+- Users/workflow: `users.html`.
+- Architecture: `architecture.html` and `architecture.excalidraw`.
+- Planning: `planning.html`.
+- Spec: `spec.html` after integration.
+- Test cases: `test-cases.html` after `spec.html`.
 - Explorer: read-only project pattern research.
 - Architect: plan decomposition and risks.
 - Worker: bounded implementation, writing, or documentation in owned files.
@@ -1058,6 +1092,7 @@ A Codex team run is complete only when the lead has:
 - synthesized agent outputs
 - confirmed no active cross-tool ownership conflict remains
 - completed the opposite-tool review when more than one agent runtime participated
+- completed both cross-review rounds and author responses
 - resolved or accepted review findings
 - run verification or documented the blocker
 - written a compound note under `docs/compound/`
@@ -1082,18 +1117,236 @@ Use this protocol whenever Claude Code, Codex, or another agent runtime may work
 
 - Claude Code uses `compound-cross-tool-reviewer` to review Codex-authored changes.
 - Codex uses `codex-cross-tool-reviewer` to review Claude-authored changes.
-- Cross-review findings are written to `docs/cross-reviews/`.
-- A task involving both tools should not finish until at least one opposite-tool review is complete or the lead documents why it was skipped.
+- Cross-review findings and responses are written to `docs/cross-reviews/<task-id>/`.
+- The required stages are `round-1-review.md`, `round-1-response.md`, `round-2-review.md`, `round-2-response.md`, and `final-acceptance.md`.
+- A task involving both tools should not finish until both review rounds and author responses are complete.
+- Stop after two rounds unless the user explicitly asks for more.
+- Planning reviews must cover `prd.html`, `planning.html`, `spec.html`, `test-cases.html`, `architecture.html`, and `users.html`.
 
 ## Commands
 
 ```bash
 python scripts/compound_orchestrator.py claim --tool codex --agent codex-worker --task-id TASK --paths src/foo.py
 python scripts/compound_orchestrator.py ownership-status --target .
-python scripts/compound_orchestrator.py cross-review --target . --task-id TASK --reviewer-tool claude --author-tool codex --summary "Reviewed Codex-authored retry handling."
+python scripts/compound_orchestrator.py cross-review --target . --task-id TASK --reviewer-tool codex --author-tool claude --stage round-1-review --summary "Round 1 findings."
+python scripts/compound_orchestrator.py cross-review --target . --task-id TASK --reviewer-tool claude --author-tool codex --stage round-1-response --summary "Author addressed round 1."
 python scripts/compound_orchestrator.py release --tool codex --agent codex-worker --task-id TASK
 ```
 """
+
+
+def core_planning_artifacts_template() -> str:
+    return """
+# Core Planning Artifacts
+
+These six HTML files are the planning contract for substantial coding, writing, research, and mixed projects:
+
+1. `prd.html` - product requirements, scope, success criteria, non-goals.
+2. `planning.html` - delivery phases, dependencies, ownership, sequencing.
+3. `spec.html` - detailed behavior, states, data contracts, validation, errors, edge conditions, and acceptance criteria.
+4. `test-cases.html` - happy paths, edge cases, error cases, performance cases, user workflow cases, and acceptance mapping derived from `spec.html`.
+5. `architecture.html` - components, boundaries, data flow, dependencies, deployment, failure modes, and an Excalidraw-compatible diagram reference.
+6. `users.html` - user roles, journeys, permissions, outcomes, and operational handoffs.
+
+Implementation should not begin until these artifacts are internally consistent and accepted through the two-round cross-review protocol.
+
+## Dependency-Aware Planning Flow
+
+1. Parallel draft `prd.html`, `users.html`, `architecture.html`, `planning.html`, and early test risks.
+2. Lead integrator reconciles scope, workflows, architecture, plan, and test risks.
+3. Write `spec.html` from the accepted PRD, users, architecture, and planning artifacts.
+4. Write `test-cases.html` from `spec.html`.
+5. Run two cross-review rounds and record final acceptance.
+"""
+
+
+def two_round_review_protocol_template() -> str:
+    return """
+# Two-Round Cross-Review Protocol
+
+`compound-cross-review` is a two-round review contract, not a one-note ritual.
+
+For each task, keep these files under `docs/cross-reviews/<task-id>/`:
+
+1. `round-1-review.md`
+2. `round-1-response.md`
+3. `round-2-review.md`
+4. `round-2-response.md`
+5. `final-acceptance.md`
+
+Codex reviews Claude-authored work, Claude addresses comments, Codex reviews again, and Claude addresses the second round. For Codex-authored work, invert the reviewer and author tools. Stop after two rounds unless the user explicitly asks for more.
+
+For planning gates, each review and response should cover all six artifacts:
+
+- `prd.html`
+- `planning.html`
+- `spec.html`
+- `test-cases.html`
+- `architecture.html`
+- `users.html`
+"""
+
+
+def parallel_agent_team_protocol_template() -> str:
+    return """
+# Parallel Agent Team Protocol
+
+Parallelize independent planning and verification work, then serialize integration and acceptance.
+
+## Phase A: Parallel Drafting
+
+| Agent | Owns | Output |
+| --- | --- | --- |
+| PRD agent | `prd.html` | Product contract |
+| Users/workflow agent | `users.html` | User and workflow contract |
+| Architecture agent | `architecture.html`, `architecture.excalidraw` | System contract and diagram |
+| Planning agent | `planning.html` | Delivery plan |
+| Test strategy agent | Initial risks for `test-cases.html` | Test categories |
+
+## Phase B: Integration
+
+The lead integrator reconciles assumptions before spec work begins.
+
+## Phase C: Spec
+
+The spec agent writes `spec.html` from accepted PRD, users, architecture, and planning artifacts.
+
+## Phase D: Tests
+
+The test-case agent writes `test-cases.html` from `spec.html`.
+
+## Phase E: Review
+
+Run the two-round cross-review protocol before implementation begins.
+
+Every editing agent claims files before edits. Failed claims stop the work until the lead narrows scope, releases stale claims, or serializes the task.
+"""
+
+
+def deliverables_checklist_template() -> str:
+    return """
+# Deliverables Checklist
+
+Use this before implementation and before final delivery.
+
+## Planning Contracts
+
+- [ ] `prd.html` complete
+- [ ] `planning.html` complete
+- [ ] `spec.html` complete
+- [ ] `test-cases.html` maps to `spec.html`
+- [ ] `architecture.html` references `architecture.excalidraw`
+- [ ] `users.html` complete
+
+## Two-Round Cross Review
+
+- [ ] `docs/cross-reviews/<task-id>/round-1-review.md`
+- [ ] `docs/cross-reviews/<task-id>/round-1-response.md`
+- [ ] `docs/cross-reviews/<task-id>/round-2-review.md`
+- [ ] `docs/cross-reviews/<task-id>/round-2-response.md`
+- [ ] `docs/cross-reviews/<task-id>/final-acceptance.md`
+
+## Delivery Evidence
+
+- [ ] Verification commands and results recorded
+- [ ] README updated or explicitly marked unaffected
+- [ ] Residual manual checks documented
+- [ ] Deployment/push blockers documented
+- [ ] Compound learning recorded
+"""
+
+
+def planning_html_template(filename: str) -> str:
+    titles = {
+        "prd.html": "Product Requirements Document",
+        "planning.html": "Implementation Planning Contract",
+        "spec.html": "Functional And Technical Specification",
+        "test-cases.html": "Test Cases And Acceptance Matrix",
+        "architecture.html": "Architecture Contract",
+        "users.html": "Users And Workflow Contract",
+    }
+    body = {
+        "prd.html": """
+      <section><h2>Problem</h2><p>State the problem, target users, business context, scope, non-goals, and measurable success criteria.</p></section>
+      <section><h2>Requirements</h2><ul><li>Functional requirements</li><li>Quality requirements</li><li>Operational requirements</li><li>Constraints and assumptions</li></ul></section>
+""",
+        "planning.html": """
+      <section><h2>Delivery Plan</h2><p>Define phases, milestones, dependencies, ownership, sequencing, risks, and verification gates.</p></section>
+      <section><h2>Agent Lanes</h2><p>Use dependency-aware parallel planning, then serialize integration and acceptance.</p></section>
+""",
+        "spec.html": """
+      <section><h2>Behavior Contract</h2><p>Define states, inputs, outputs, data contracts, validation, errors, edge conditions, performance expectations, and acceptance criteria.</p></section>
+      <section><h2>Traceability</h2><p>Link every behavior to PRD, users, architecture, and planning decisions.</p></section>
+""",
+        "test-cases.html": """
+      <section><h2>Source Specification</h2><p>Tests are derived from <a href=\"spec.html\">spec.html</a>.</p></section>
+      <section><h2>Coverage Matrix</h2><ul><li>Happy paths</li><li>Edge cases</li><li>Error cases</li><li>Performance cases</li><li>User workflow cases</li><li>Acceptance criteria</li></ul></section>
+""",
+        "architecture.html": """
+      <section><h2>Architecture Diagram</h2><p>Open the Excalidraw-compatible diagram: <a href=\"architecture.excalidraw\">architecture.excalidraw</a>.</p></section>
+      <section><h2>System Boundaries</h2><p>Document components, data flow, dependencies, deployment shape, failure modes, observability, and security boundaries.</p></section>
+""",
+        "users.html": """
+      <section><h2>User Roles</h2><p>Document primary users, secondary users, administrators, operators, and external systems.</p></section>
+      <section><h2>Workflows</h2><p>Map journeys, permissions, handoffs, pain points, expected outcomes, and support paths.</p></section>
+""",
+    }
+    return f"""<!doctype html>
+<html lang=\"en\">
+  <head>
+    <meta charset=\"utf-8\">
+    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
+    <title>{titles[filename]}</title>
+    <style>
+      body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.55; margin: 2rem; max-width: 980px; }}
+      header, section {{ margin-bottom: 1.5rem; }}
+      code {{ background: #f3f4f6; padding: 0.1rem 0.25rem; border-radius: 4px; }}
+      table {{ border-collapse: collapse; width: 100%; }}
+      th, td {{ border: 1px solid #d1d5db; padding: 0.5rem; text-align: left; vertical-align: top; }}
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>{titles[filename]}</h1>
+      <p>Generated by Compound Orchestrator. Replace template text with project-specific contracts before implementation.</p>
+    </header>
+{body[filename]}
+    <section>
+      <h2>Two-Round Review Trace</h2>
+      <table>
+        <thead><tr><th>Stage</th><th>Status</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td>Round 1 review</td><td>Pending</td><td>Record in <code>docs/cross-reviews/&lt;task-id&gt;/round-1-review.md</code>.</td></tr>
+          <tr><td>Round 1 response</td><td>Pending</td><td>Authoring tool addresses comments.</td></tr>
+          <tr><td>Round 2 review</td><td>Pending</td><td>Reviewer checks revisions.</td></tr>
+          <tr><td>Round 2 response</td><td>Pending</td><td>Authoring tool addresses second round.</td></tr>
+          <tr><td>Final acceptance</td><td>Pending</td><td>Implementation may begin after acceptance.</td></tr>
+        </tbody>
+      </table>
+    </section>
+  </body>
+</html>"""
+
+
+def architecture_excalidraw_template() -> str:
+    return json.dumps(
+        {
+            "type": "excalidraw",
+            "version": 2,
+            "source": "compound-orchestrator",
+            "elements": [
+                {"id": "users", "type": "rectangle", "x": 20, "y": 80, "width": 160, "height": 80, "angle": 0, "strokeColor": "#1f2937", "backgroundColor": "#dbeafe", "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1, "opacity": 100, "groupIds": [], "frameId": None, "roundness": {"type": 3}, "seed": 1, "version": 1, "versionNonce": 1, "isDeleted": False, "boundElements": [], "updated": 1, "link": None, "locked": False},
+                {"id": "app", "type": "rectangle", "x": 260, "y": 80, "width": 180, "height": 80, "angle": 0, "strokeColor": "#1f2937", "backgroundColor": "#dcfce7", "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1, "opacity": 100, "groupIds": [], "frameId": None, "roundness": {"type": 3}, "seed": 2, "version": 1, "versionNonce": 2, "isDeleted": False, "boundElements": [], "updated": 1, "link": None, "locked": False},
+                {"id": "services", "type": "rectangle", "x": 520, "y": 80, "width": 200, "height": 80, "angle": 0, "strokeColor": "#1f2937", "backgroundColor": "#fef3c7", "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1, "opacity": 100, "groupIds": [], "frameId": None, "roundness": {"type": 3}, "seed": 3, "version": 1, "versionNonce": 3, "isDeleted": False, "boundElements": [], "updated": 1, "link": None, "locked": False},
+                {"id": "users-text", "type": "text", "x": 55, "y": 105, "width": 90, "height": 25, "angle": 0, "strokeColor": "#111827", "backgroundColor": "transparent", "fillStyle": "solid", "strokeWidth": 1, "strokeStyle": "solid", "roughness": 1, "opacity": 100, "groupIds": [], "frameId": None, "roundness": None, "seed": 4, "version": 1, "versionNonce": 4, "isDeleted": False, "boundElements": [], "updated": 1, "link": None, "locked": False, "text": "Users", "fontSize": 20, "fontFamily": 1, "textAlign": "center", "verticalAlign": "middle", "containerId": None, "originalText": "Users", "lineHeight": 1.25},
+                {"id": "app-text", "type": "text", "x": 287, "y": 105, "width": 130, "height": 25, "angle": 0, "strokeColor": "#111827", "backgroundColor": "transparent", "fillStyle": "solid", "strokeWidth": 1, "strokeStyle": "solid", "roughness": 1, "opacity": 100, "groupIds": [], "frameId": None, "roundness": None, "seed": 5, "version": 1, "versionNonce": 5, "isDeleted": False, "boundElements": [], "updated": 1, "link": None, "locked": False, "text": "Application", "fontSize": 20, "fontFamily": 1, "textAlign": "center", "verticalAlign": "middle", "containerId": None, "originalText": "Application", "lineHeight": 1.25},
+                {"id": "services-text", "type": "text", "x": 552, "y": 105, "width": 135, "height": 25, "angle": 0, "strokeColor": "#111827", "backgroundColor": "transparent", "fillStyle": "solid", "strokeWidth": 1, "strokeStyle": "solid", "roughness": 1, "opacity": 100, "groupIds": [], "frameId": None, "roundness": None, "seed": 6, "version": 1, "versionNonce": 6, "isDeleted": False, "boundElements": [], "updated": 1, "link": None, "locked": False, "text": "Services / Data", "fontSize": 20, "fontFamily": 1, "textAlign": "center", "verticalAlign": "middle", "containerId": None, "originalText": "Services / Data", "lineHeight": 1.25},
+            ],
+            "appState": {"gridSize": None, "viewBackgroundColor": "#ffffff"},
+            "files": {},
+        },
+        indent=2,
+    )
 
 
 def verify_py_template() -> str:
@@ -1132,8 +1385,19 @@ REQUIRED_FILES = [
     ".agent-loop/team-topology.md",
     ".agent-loop/codex-parallel-contract.md",
     ".agent-loop/cross-tool-protocol.md",
+    ".agent-loop/core-planning-artifacts.md",
+    ".agent-loop/two-round-review-protocol.md",
+    ".agent-loop/parallel-agent-team-protocol.md",
+    ".agent-loop/deliverables-checklist.md",
     ".agent-loop/readme-maintenance.md",
     ".agent-loop/coordination/ownership.json",
+    "prd.html",
+    "planning.html",
+    "spec.html",
+    "test-cases.html",
+    "architecture.html",
+    "architecture.excalidraw",
+    "users.html",
     ".claude/settings.json",
     ".claude/commands/compound-start.md",
     ".claude/commands/compound-plan.md",
@@ -1146,6 +1410,7 @@ REQUIRED_FILES = [
     ".claude/commands/compound-release.md",
     ".claude/commands/compound-ownership-status.md",
     ".claude/commands/compound-cross-review.md",
+    ".claude/commands/compound-deliverables-check.md",
     ".claude/agents/compound-architect.md",
     ".claude/agents/compound-reviewer.md",
     ".claude/agents/compound-test-runner.md",
@@ -1222,6 +1487,23 @@ def verify_compound(root: Path) -> List[str]:
         for phrase in ["Remove old information", "Keep unchanged information", "Add new content", "Reorganize"]:
             if phrase not in text:
                 errors.append(f"README maintenance guide is missing policy phrase: {phrase}")
+
+    architecture_html = root / "architecture.html"
+    if architecture_html.exists():
+        text = architecture_html.read_text(encoding="utf-8").lower()
+        if "excalidraw" not in text or "architecture.excalidraw" not in text:
+            errors.append("architecture.html must reference architecture.excalidraw")
+    architecture_diagram = root / "architecture.excalidraw"
+    if architecture_diagram.exists():
+        diagram = load_json(architecture_diagram, errors)
+        if isinstance(diagram, dict) and diagram.get("type") != "excalidraw":
+            errors.append("architecture.excalidraw must have type=excalidraw")
+    test_cases = root / "test-cases.html"
+    if test_cases.exists():
+        text = test_cases.read_text(encoding="utf-8").lower()
+        for phrase in ["spec.html", "happy", "edge", "error", "performance", "user workflow", "acceptance"]:
+            if phrase not in text:
+                errors.append(f"test-cases.html must map coverage to spec.html and include: {phrase}")
 
     settings_path = root / ".claude/settings.json"
     if settings_path.exists():
@@ -1446,12 +1728,15 @@ Turn the current task brief into an implementation plan.
 
 Include:
 
+- the six core planning artifacts: `prd.html`, `planning.html`, `spec.html`, `test-cases.html`, `architecture.html`, and `users.html`
 - files, drafts, or artifacts likely to change
 - tests to add or run
 - README sections likely to change or a note that README is unaffected
 - risks and mitigations
 - agent lanes with disjoint ownership
 - completion gate checklist
+
+Use dependency-aware planning: parallelize PRD, users, architecture, planning, and test-risk drafting; serialize integration, `spec.html`, `test-cases.html`, and acceptance.
 """,
         ".claude/commands/compound-review.md": """
 # Compound Review
@@ -1490,19 +1775,21 @@ Steps:
 
 1. Create or update a plan with `compound-start`.
 2. Create a team run note in `docs/compound/`.
-3. Ask Claude to create an agent team with 3-5 teammates.
-4. Use project or plugin teammate types: `compound-architect`, `compound-test-runner`, and `compound-reviewer`.
-5. Assign each teammate a scoped task, owned files, output artifact, and verification responsibility.
-6. Wait for teammates to finish before synthesis.
-7. Write a compound note before declaring completion.
+3. Ask Claude to create a dependency-aware planning team.
+4. Parallelize PRD, users, architecture, planning, and early test strategy.
+5. Serialize integration, `spec.html`, `test-cases.html`, and final acceptance.
+6. Run the two-round cross-review protocol before implementation.
+7. Assign each teammate a scoped task, owned files, output artifact, and verification responsibility.
+8. Wait for teammates to finish before synthesis.
+9. Write a compound note before declaring completion.
 
 Starter prompt:
 
 ```text
-Create an agent team for this task. Use `.agent-loop/team-topology.md`.
-Spawn a `compound-architect`, a `compound-test-runner`, and a `compound-reviewer`.
-Only add an implementer teammate if the write scope is disjoint and clear.
-Keep the team to 3-5 teammates, wait for them to finish, synthesize findings, run verification, and write a compound note.
+Create an agent team for this task. Use `.agent-loop/team-topology.md`, `.agent-loop/core-planning-artifacts.md`, and `.agent-loop/parallel-agent-team-protocol.md`.
+Spawn PRD, users/workflow, architecture, planning, test-strategy, spec, test-case, and reviewer lanes as dependency order allows.
+Do not start implementation until `prd.html`, `planning.html`, `spec.html`, `test-cases.html`, `architecture.html`, and `users.html` pass two review rounds and final acceptance.
+Keep write scopes disjoint, wait for teammates to finish, synthesize findings, run verification, and write a compound note.
 ```
 """,
         ".claude/commands/compound-harness-check.md": """
@@ -1556,18 +1843,38 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/compound_orchestrator.py" ownership-statu
         ".claude/commands/compound-cross-review.md": """
 # Compound Cross Review
 
-Use this when Claude Code reviews Codex-authored or other-agent-authored changes.
+Use this for the required two-round cross-tool review protocol.
 
 Steps:
 
 1. Inspect active ownership with `compound-ownership-status`.
 2. Review only the authoring agent's diff or paths named by the lead.
-3. Lead with findings ordered by severity.
-4. Write the result:
+3. Cover all six planning artifacts when this is a planning gate: `prd.html`, `planning.html`, `spec.html`, `test-cases.html`, `architecture.html`, and `users.html`.
+4. Lead with findings ordered by severity.
+5. Write each stage:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/compound_orchestrator.py" cross-review --target . --task-id TASK_ID --reviewer-tool claude --author-tool codex --summary "Reviewed Codex-authored changes and found ..."
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/compound_orchestrator.py" cross-review --target . --task-id TASK_ID --reviewer-tool codex --author-tool claude --stage round-1-review --summary "Round 1 findings..."
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/compound_orchestrator.py" cross-review --target . --task-id TASK_ID --reviewer-tool claude --author-tool codex --stage round-1-response --summary "Claude addressed round 1..."
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/compound_orchestrator.py" cross-review --target . --task-id TASK_ID --reviewer-tool codex --author-tool claude --stage round-2-review --summary "Round 2 findings..."
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/compound_orchestrator.py" cross-review --target . --task-id TASK_ID --reviewer-tool claude --author-tool codex --stage round-2-response --summary "Claude addressed round 2..."
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/compound_orchestrator.py" cross-review --target . --task-id TASK_ID --reviewer-tool codex --author-tool claude --stage final-acceptance --summary "Accepted after two rounds."
 ```
+
+Stop after two rounds unless the user explicitly asks for another loop.
+""",
+        ".claude/commands/compound-deliverables-check.md": """
+# Compound Deliverables Check
+
+Check that the planning contracts, two-round review artifacts, verification evidence, README freshness, and compound learning are ready for handoff.
+
+Run:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/compound_orchestrator.py" check --target . --task-id TASK_ID
+```
+
+If this fails, address missing artifacts instead of declaring the work complete.
 """,
     }
 
@@ -1650,6 +1957,17 @@ def init_project(root: Path, *, force: bool = False) -> WriteReport:
         ".agent-loop/team-topology.md": team_topology_template(),
         ".agent-loop/codex-parallel-contract.md": codex_parallel_contract_template(),
         ".agent-loop/cross-tool-protocol.md": cross_tool_protocol_template(),
+        ".agent-loop/core-planning-artifacts.md": core_planning_artifacts_template(),
+        ".agent-loop/two-round-review-protocol.md": two_round_review_protocol_template(),
+        ".agent-loop/parallel-agent-team-protocol.md": parallel_agent_team_protocol_template(),
+        ".agent-loop/deliverables-checklist.md": deliverables_checklist_template(),
+        "prd.html": planning_html_template("prd.html"),
+        "planning.html": planning_html_template("planning.html"),
+        "spec.html": planning_html_template("spec.html"),
+        "test-cases.html": planning_html_template("test-cases.html"),
+        "architecture.html": planning_html_template("architecture.html"),
+        "architecture.excalidraw": architecture_excalidraw_template(),
+        "users.html": planning_html_template("users.html"),
         "scripts/verify.py": verify_py_template(),
         "scripts/verify.ps1": verify_script_template(),
         "scripts/verify.sh": verify_sh_template(),
@@ -1686,11 +2004,24 @@ Task id: `{task_id}`
 ## Plan
 
 - [ ] Understand existing patterns
+- [ ] Complete six planning contracts (`prd.html`, `planning.html`, `spec.html`, `test-cases.html`, `architecture.html`, `users.html`)
+- [ ] Run two-round cross review for planning artifacts before implementation
 - [ ] Implement scoped change
 - [ ] Add or update verification
-- [ ] Review diff
+- [ ] Run two-round cross review for implementation artifacts
 - [ ] Update README if project setup, usage, workflow, architecture, outputs, or audience-facing behavior changed
 - [ ] Write compound note
+
+## Core Planning Contracts
+
+| Artifact | Owner | Status |
+| --- | --- | --- |
+| `prd.html` | PRD agent | Pending |
+| `planning.html` | Planning agent | Pending |
+| `spec.html` | Spec agent | Pending |
+| `test-cases.html` | Test-case agent | Pending |
+| `architecture.html` + `architecture.excalidraw` | Architecture agent | Pending |
+| `users.html` | Users/workflow agent | Pending |
 
 ## Verification
 
@@ -1740,6 +2071,9 @@ Mode: `{mode}`
 
 - `.agent-loop/team-topology.md`
 - `.agent-loop/codex-parallel-contract.md`
+- `.agent-loop/core-planning-artifacts.md`
+- `.agent-loop/parallel-agent-team-protocol.md`
+- `.agent-loop/two-round-review-protocol.md`
 - `.agent-loop/review-rubric.md`
 
 ## Team Members
@@ -1747,8 +2081,12 @@ Mode: `{mode}`
 | Agent | Runtime | Role | Owned Files Or Scope | Output Artifact | Status |
 | --- | --- | --- | --- | --- | --- |
 | Lead Integrator | {mode} | Synthesis and integration | TBD | Final diff and summary | Pending |
-| Architect | {mode} | Existing patterns and risks | Read-only | Architecture notes | Pending |
-| Test Runner | {mode} | Verification | Tests and commands | Test results | Pending |
+| PRD Agent | {mode} | Requirements contract | `prd.html` | PRD draft | Pending |
+| Users Agent | {mode} | User/workflow contract | `users.html` | User workflow draft | Pending |
+| Architecture Agent | {mode} | Architecture contract and diagram | `architecture.html`, `architecture.excalidraw` | Architecture draft | Pending |
+| Planning Agent | {mode} | Delivery plan | `planning.html` | Planning draft | Pending |
+| Spec Agent | {mode} | Behavioral contract after integration | `spec.html` | Spec draft | Pending |
+| Test Runner | {mode} | Test cases from spec | `test-cases.html` | Test matrix | Pending |
 | Reviewer | {mode} | Findings and learning | Read-only | Review findings | Pending |
 
 ## Coordination Notes
@@ -1760,6 +2098,8 @@ Mode: `{mode}`
 - Codex reviews Claude-authored changes with `codex-cross-tool-reviewer`.
 - Teammates should share findings before implementation when coordination is needed.
 - The lead waits for teammates before final synthesis.
+- Parallelize PRD, users, architecture, planning, and early test strategy; serialize integration, spec, test-case finalization, and acceptance.
+- Run exactly two cross-review rounds unless the user explicitly asks for more.
 - The lead keeps `README.md` current when the work changes setup, usage, workflow, architecture, outputs, or reader-facing behavior.
 
 ## Verification
@@ -1842,12 +2182,15 @@ def cross_review(
     reviewer_tool: str,
     author_tool: str,
     summary: str,
+    stage: str = "round-1-review",
     force: bool = False,
 ) -> Tuple[str, WriteReport]:
     reviewer_tool = validate_tool_name(reviewer_tool, field="reviewer_tool")
     author_tool = validate_tool_name(author_tool, field="author_tool")
     if reviewer_tool == author_tool:
         raise ValueError("cross-tool review requires different reviewer and author tools")
+    if stage not in CROSS_REVIEW_STAGES:
+        raise ValueError(f"stage must be one of: {', '.join(CROSS_REVIEW_STAGES)}")
 
     root = root.resolve()
     claims = active_claims(root)
@@ -1860,30 +2203,67 @@ def cross_review(
         f"- `{claim.get('path')}` claimed by {claim.get('tool')}/{claim.get('agent')}: {claim.get('intent', '')}"
         for claim in relevant_claims
     ) or "- No active author-tool claims found for this task; reviewer should confirm this is expected."
-    title = f"{reviewer_tool.title()} Review Of {author_tool.title()} Changes"
+    title = f"{stage.replace('-', ' ').title()}: {reviewer_tool.title()} And {author_tool.title()} Cross Review"
+    artifact_lines = "\n".join(f"- `{name}`" for name in CORE_PLANNING_ARTIFACTS)
+    if stage.endswith("response"):
+        stage_prompt = """
+## Response To Findings
+
+- Accepted comments:
+- Changes made:
+- Comments declined with rationale:
+
+## Verification Run
+
+- Command:
+- Result:
+"""
+    elif stage == "final-acceptance":
+        stage_prompt = """
+## Final Acceptance
+
+- Planning contracts accepted:
+- Implementation or document changes accepted:
+- Residual risks:
+- User-requested third round needed: no
+"""
+    else:
+        stage_prompt = """
+## Findings
+
+Lead with blocking findings, then important should-fix items, then residual risks.
+
+## Verification
+
+- Command:
+- Result:
+
+## Follow-Up Required From Author
+"""
     body = f"""
 # {title}
 
 Task id: `{task_id}`
 Reviewer tool: `{reviewer_tool}`
 Author tool: `{author_tool}`
+Stage: `{stage}`
 Date: `{_dt.date.today().isoformat()}`
 
 ## Summary
 
 {summary}
 
+## Planning Artifacts Covered
+
+{artifact_lines}
+
 ## Author Claims Checked
 
 {claim_lines}
 
-## Findings
-
-## Verification
-
-## Follow-Up
+{stage_prompt}
 """
-    relative = f"docs/cross-reviews/{task_id}-{reviewer_tool}-reviews-{author_tool}.md"
+    relative = f"docs/cross-reviews/{task_id}/{stage}.md"
     report = ensure_dirs(root)
     report.extend(write_file(root, relative, body, force=force))
     return relative, report
@@ -1916,7 +2296,18 @@ def check_project(root: Path, task_id: Optional[str] = None) -> Tuple[bool, List
         ".agent-loop/team-topology.md",
         ".agent-loop/codex-parallel-contract.md",
         ".agent-loop/cross-tool-protocol.md",
+        ".agent-loop/core-planning-artifacts.md",
+        ".agent-loop/two-round-review-protocol.md",
+        ".agent-loop/parallel-agent-team-protocol.md",
+        ".agent-loop/deliverables-checklist.md",
         ".agent-loop/coordination/ownership.json",
+        "prd.html",
+        "planning.html",
+        "spec.html",
+        "test-cases.html",
+        "architecture.html",
+        "architecture.excalidraw",
+        "users.html",
         ".claude/settings.json",
         "scripts/compound_orchestrator.py",
         "scripts/verify.py",
@@ -1933,6 +2324,7 @@ def check_project(root: Path, task_id: Optional[str] = None) -> Tuple[bool, List
         ".claude/commands/compound-release.md",
         ".claude/commands/compound-ownership-status.md",
         ".claude/commands/compound-cross-review.md",
+        ".claude/commands/compound-deliverables-check.md",
         ".claude/agents/compound-architect.md",
         ".claude/agents/compound-reviewer.md",
         ".claude/agents/compound-test-runner.md",
@@ -1941,6 +2333,27 @@ def check_project(root: Path, task_id: Optional[str] = None) -> Tuple[bool, List
     for item in required_files:
         if not (root / item).is_file():
             failures.append(f"Missing file: {item}")
+
+    architecture_html = root / "architecture.html"
+    if architecture_html.exists():
+        text = architecture_html.read_text(encoding="utf-8").lower()
+        if "excalidraw" not in text or "architecture.excalidraw" not in text:
+            failures.append("architecture.html must reference an Excalidraw-compatible diagram, usually architecture.excalidraw")
+    architecture_diagram = root / "architecture.excalidraw"
+    if architecture_diagram.exists():
+        try:
+            diagram = json.loads(architecture_diagram.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            failures.append(f"Invalid JSON in architecture.excalidraw: {exc}")
+        else:
+            if not isinstance(diagram, dict) or diagram.get("type") != "excalidraw":
+                failures.append("architecture.excalidraw must be an Excalidraw-compatible JSON file")
+    test_cases = root / "test-cases.html"
+    if test_cases.exists():
+        text = test_cases.read_text(encoding="utf-8").lower()
+        for phrase in ["spec.html", "happy", "edge", "error", "performance", "user workflow", "acceptance"]:
+            if phrase not in text:
+                failures.append(f"test-cases.html must map coverage to spec.html and include: {phrase}")
 
     for item in ["README.md", "AGENTS.md", "CLAUDE.md"]:
         path = root / item
@@ -1994,9 +2407,17 @@ def check_project(root: Path, task_id: Optional[str] = None) -> Tuple[bool, List
             f"docs/reviews/{task_id}.md",
             f"docs/compound/{task_id}.md",
         ]
+        task_files.extend(f"docs/cross-reviews/{task_id}/{stage}.md" for stage in CROSS_REVIEW_STAGES)
         for item in task_files:
             if not (root / item).is_file():
                 failures.append(f"Task gate missing file: {item}")
+        for stage in CROSS_REVIEW_STAGES:
+            path = root / f"docs/cross-reviews/{task_id}/{stage}.md"
+            if path.exists():
+                text = path.read_text(encoding="utf-8")
+                for artifact in CORE_PLANNING_ARTIFACTS:
+                    if artifact not in text:
+                        failures.append(f"Task gate review file {path.relative_to(root).as_posix()} must mention {artifact}")
 
     return not failures, failures
 
@@ -2137,6 +2558,7 @@ def self_test(plugin_root: Path) -> Tuple[bool, List[str]]:
         "commands/compound-release.md",
         "commands/compound-ownership-status.md",
         "commands/compound-cross-review.md",
+        "commands/compound-deliverables-check.md",
         "agents/compound-architect.agent.md",
         "agents/compound-reviewer.agent.md",
         "agents/compound-test-runner.agent.md",
@@ -2220,6 +2642,16 @@ def self_test(plugin_root: Path) -> Tuple[bool, List[str]]:
             task_id=task_id,
             force=False,
         )
+        for stage in CROSS_REVIEW_STAGES:
+            cross_review(
+                target,
+                task_id=task_id,
+                reviewer_tool="codex" if "review" in stage or stage == "final-acceptance" else "claude",
+                author_tool="claude" if "review" in stage or stage == "final-acceptance" else "codex",
+                summary=f"Self-test {stage} covers all six planning artifacts.",
+                stage=stage,
+                force=False,
+            )
         ok, check_failures = check_project(target, task_id=task_id)
         if not ok:
             failures.extend(f"task gate check: {item}" for item in check_failures)
@@ -2314,6 +2746,12 @@ def build_parser() -> argparse.ArgumentParser:
     cross_p.add_argument("--reviewer-tool", required=True, help="Agent runtime doing the review.")
     cross_p.add_argument("--author-tool", required=True, help="Agent runtime whose work is being reviewed.")
     cross_p.add_argument("--summary", required=True, help="Review summary.")
+    cross_p.add_argument(
+        "--stage",
+        default="round-1-review",
+        choices=CROSS_REVIEW_STAGES,
+        help="Two-round review stage to record.",
+    )
     cross_p.add_argument("--force", action="store_true", help="Overwrite existing review artifact.")
     cross_p.add_argument("--json", action="store_true", help="Print JSON report.")
 
@@ -2448,6 +2886,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             reviewer_tool=args.reviewer_tool,
             author_tool=args.author_tool,
             summary=args.summary,
+            stage=args.stage,
             force=args.force,
         )
         print_report(report, json_output=args.json, extra={"note": note_path})

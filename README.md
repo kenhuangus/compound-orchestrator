@@ -7,6 +7,9 @@ It works across Windows, macOS, Linux, and WSL. Claude Code and Codex get first-
 ## What It Gives You
 
 - `README.md` maintenance policy for keeping project docs current instead of stale.
+- Six core planning contracts: `prd.html`, `planning.html`, `spec.html`, `test-cases.html`, `architecture.html`, and `users.html`.
+- An Excalidraw-compatible `architecture.excalidraw` seed referenced from `architecture.html`.
+- A mandatory two-round cross-review protocol with author responses after each review.
 - `AGENTS.md` and `CLAUDE.md` managed protocol blocks for shared agent behavior.
 - Claude Code slash commands, subagent definitions, hooks, and agent-team enablement.
 - A Codex parallel-agent contract that mirrors the Claude team topology.
@@ -26,7 +29,7 @@ Use this plugin for:
 The core loop is:
 
 ```text
-brainstorm -> plan -> work -> review -> compound -> repeat
+brainstorm -> plan -> six planning contracts -> two-round review -> work -> two-round review -> compound -> repeat
 ```
 
 The final step is the point. Each completed task should improve the next task by recording a reusable pattern, decision, failure note, review, or compound note.
@@ -86,6 +89,14 @@ Start a team run:
 python3 scripts/compound_orchestrator.py team-start --target . --title "Refactor checkout flow" --mode codex-parallel-agents
 ```
 
+Substantial projects should complete the generated planning contracts before implementation:
+
+```text
+prd.html -> planning.html -> spec.html -> test-cases.html -> architecture.html -> users.html
+```
+
+Planning should still be parallel where it is independent. Draft PRD, users, architecture, planning, and early test strategy in parallel; then serialize integration, `spec.html`, `test-cases.html`, review, and final acceptance.
+
 Claim files or artifacts before editing:
 
 ```bash
@@ -100,11 +111,17 @@ Release claims after integration or handoff:
 python3 scripts/compound_orchestrator.py release --target . --tool codex --agent codex-worker --task-id TASK
 ```
 
-Record opposite-tool review:
+Record the two-round opposite-tool review:
 
 ```bash
-python3 scripts/compound_orchestrator.py cross-review --target . --task-id TASK --reviewer-tool claude --author-tool codex --summary "Claude reviewed Codex-authored retry handling."
+python3 scripts/compound_orchestrator.py cross-review --target . --task-id TASK --reviewer-tool codex --author-tool claude --stage round-1-review --summary "Codex reviewed Claude-authored planning."
+python3 scripts/compound_orchestrator.py cross-review --target . --task-id TASK --reviewer-tool claude --author-tool codex --stage round-1-response --summary "Claude addressed round 1."
+python3 scripts/compound_orchestrator.py cross-review --target . --task-id TASK --reviewer-tool codex --author-tool claude --stage round-2-review --summary "Codex reviewed revisions."
+python3 scripts/compound_orchestrator.py cross-review --target . --task-id TASK --reviewer-tool claude --author-tool codex --stage round-2-response --summary "Claude addressed round 2."
+python3 scripts/compound_orchestrator.py cross-review --target . --task-id TASK --reviewer-tool codex --author-tool claude --stage final-acceptance --summary "Accepted after two rounds."
 ```
+
+Stop after two rounds unless the user explicitly asks for another review loop.
 
 Record durable learning:
 
@@ -192,6 +209,7 @@ They do not need Claude's runtime team mailbox or Codex's chat interface. They o
 | `release` | Release active ownership claims. |
 | `ownership-status` | Show active claims and conflicts. |
 | `cross-review` | Record a review by one runtime of another runtime's work. |
+| `compound-deliverables-check` | Claude command for checking planning contracts, review rounds, verification, README freshness, and compound learning. |
 | `learn` | Write a durable pattern, decision, failure, review, or compound note. |
 | `self-test` | Validate this plugin package and generated project behavior. |
 

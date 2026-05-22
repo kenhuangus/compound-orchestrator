@@ -13,6 +13,18 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import compound_orchestrator as co  # noqa: E402
 
 
+def complete_two_round_review(root: Path, task_id: str) -> None:
+    for stage in co.CROSS_REVIEW_STAGES:
+        co.cross_review(
+            root,
+            task_id=task_id,
+            reviewer_tool="codex" if "review" in stage or stage == "final-acceptance" else "claude",
+            author_tool="claude" if "review" in stage or stage == "final-acceptance" else "codex",
+            summary=f"Test fixture completed {stage} across all six planning artifacts.",
+            stage=stage,
+        )
+
+
 class CompoundOrchestratorTests(unittest.TestCase):
     def test_init_creates_expected_project_structure(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -43,6 +55,13 @@ class CompoundOrchestratorTests(unittest.TestCase):
             self.assertTrue((root / ".agent-loop/team-topology.md").is_file())
             self.assertTrue((root / ".agent-loop/codex-parallel-contract.md").is_file())
             self.assertTrue((root / ".agent-loop/cross-tool-protocol.md").is_file())
+            self.assertTrue((root / ".agent-loop/core-planning-artifacts.md").is_file())
+            self.assertTrue((root / ".agent-loop/two-round-review-protocol.md").is_file())
+            self.assertTrue((root / ".agent-loop/parallel-agent-team-protocol.md").is_file())
+            self.assertTrue((root / ".agent-loop/deliverables-checklist.md").is_file())
+            for artifact in co.CORE_PLANNING_ARTIFACTS:
+                self.assertTrue((root / artifact).is_file(), artifact)
+            self.assertTrue((root / "architecture.excalidraw").is_file())
             self.assertTrue((root / ".agent-loop/coordination/ownership.json").is_file())
             self.assertTrue((root / "scripts/compound_orchestrator.py").is_file())
             self.assertTrue((root / "scripts/verify.py").is_file())
@@ -55,6 +74,46 @@ class CompoundOrchestratorTests(unittest.TestCase):
             self.assertIn(co.MANAGED_START, (root / "AGENTS.md").read_text(encoding="utf-8"))
             self.assertIn(co.MANAGED_START, (root / "CLAUDE.md").read_text(encoding="utf-8"))
             self.assertIn(co.MANAGED_START, (root / "README.md").read_text(encoding="utf-8"))
+
+    def test_core_planning_artifacts_have_architecture_and_spec_test_mapping(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            co.init_project(root)
+
+            architecture = (root / "architecture.html").read_text(encoding="utf-8")
+            tests = (root / "test-cases.html").read_text(encoding="utf-8")
+            diagram = json.loads((root / "architecture.excalidraw").read_text(encoding="utf-8"))
+
+            self.assertIn("architecture.excalidraw", architecture)
+            self.assertEqual(diagram["type"], "excalidraw")
+            for phrase in ["spec.html", "Happy paths", "Edge cases", "Error cases", "Performance cases", "User workflow cases", "Acceptance criteria"]:
+                self.assertIn(phrase, tests)
+
+    def test_task_gate_requires_two_round_cross_review_and_responses(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            co.init_project(root)
+            task_id, _ = co.start_task(root, "Require two reviews", today=dt.date(2026, 5, 21))
+            co.learn(root, kind="review", title="Review require two reviews", summary="Local review done.", task_id=task_id)
+            co.learn(root, kind="compound", title="Compound require two reviews", summary="Learning done.", task_id=task_id)
+            co.cross_review(
+                root,
+                task_id=task_id,
+                reviewer_tool="codex",
+                author_tool="claude",
+                summary="Round one only.",
+                stage="round-1-review",
+            )
+
+            ok, failures = co.check_project(root, task_id=task_id)
+
+            self.assertFalse(ok)
+            self.assertIn(f"Task gate missing file: docs/cross-reviews/{task_id}/round-1-response.md", failures)
+            self.assertIn(f"Task gate missing file: docs/cross-reviews/{task_id}/final-acceptance.md", failures)
+
+            complete_two_round_review(root, task_id)
+            ok, failures = co.check_project(root, task_id=task_id)
+            self.assertTrue(ok, failures)
 
     def test_init_preserves_existing_docs_and_appends_managed_blocks(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -148,6 +207,7 @@ class CompoundOrchestratorTests(unittest.TestCase):
                 summary="The gate requires review and compound notes.",
                 task_id=task_id,
             )
+            complete_two_round_review(root, task_id)
 
             ok, failures = co.check_project(root, task_id=task_id)
             self.assertTrue(ok, failures)
@@ -329,7 +389,9 @@ class CompoundOrchestratorTests(unittest.TestCase):
                 reviewer_tool="claude",
                 author_tool="codex",
                 summary="Claude reviewed Codex tests.",
+                stage="round-1-response",
             )
+            complete_two_round_review(root, task_id)
             self.assertTrue((root / codex_review).is_file())
             self.assertTrue((root / claude_review).is_file())
 
